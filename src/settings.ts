@@ -1,5 +1,5 @@
 import { Plugin } from 'obsidian';
-import { PluginSettings, ChannelMapping } from './types';
+import { PluginSettings, ChannelMapping, DEFAULT_SETTINGS } from './types';
 
 // 不足している型定義を追加
 export type DeepPartial<T> = {
@@ -12,31 +12,7 @@ export interface SettingsChangeEvent {
   newValue: any;
 }
 
-export const DEFAULT_SETTINGS: PluginSettings = {
-  slackToken: null,
-  syncInterval: 15, // 15分間隔
-  channelMappings: [],
-  dailyNoteSettings: {
-    enabled: false,
-    folder: 'Daily Notes',
-    dateFormat: 'YYYY-MM-DD',
-    headerFormat: '## Slack Messages',
-    appendToExisting: true,
-  },
-  messageFormat: {
-    includeTimestamp: true,
-    includeUserName: true,
-    includeChannelName: false,
-    timestampFormat: 'HH:mm',
-    convertMentions: true,
-    preserveEmojis: true,
-  },
-  syncHistory: {
-    lastSyncTime: null,
-    totalMessagesSynced: 0,
-    channelLastSync: {},
-  },
-};
+// Use DEFAULT_SETTINGS from types.ts
 
 export class SettingsManager {
   private plugin: Plugin;
@@ -246,6 +222,10 @@ export class SettingsManager {
         typeof data.syncHistory === 'object' && data.syncHistory !== null
           ? { ...DEFAULT_SETTINGS.syncHistory, ...data.syncHistory }
           : DEFAULT_SETTINGS.syncHistory,
+      storageSettings:
+        typeof data.storageSettings === 'object' && data.storageSettings !== null
+          ? { ...DEFAULT_SETTINGS.storageSettings, ...data.storageSettings }
+          : DEFAULT_SETTINGS.storageSettings,
     };
 
     return migrated;

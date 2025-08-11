@@ -1,5 +1,3 @@
-import { SettingsManager } from './settings';
-import { CryptoManager } from './crypto';
 import { Result } from './types';
 
 export interface AuthResult {
@@ -24,19 +22,28 @@ export interface SlackAuthResponse {
 }
 
 export class SlackAuthManager {
-  private settingsManager: SettingsManager;
-  private cryptoManager: CryptoManager;
+  private plugin: any; // プラグインインスタンスへの参照
   private currentState: string | null = null;
 
   // Slack App設定
   private readonly CLIENT_ID: string;
   private readonly CLIENT_SECRET: string;
   private readonly REDIRECT_URI = 'obsidian://slack-sync/auth/callback';
-  private readonly SCOPES = ['channels:read', 'channels:history', 'users:read'];
+  private readonly SCOPES = [
+    'channels:read',      // パブリックチャンネル一覧の取得
+    'channels:history',   // パブリックチャンネルの履歴取得
+    'groups:read',        // プライベートチャンネル一覧の取得  
+    'groups:history',     // プライベートチャンネルの履歴取得
+    'im:read',           // DM一覧の取得
+    'im:history',        // DMの履歴取得
+    'mpim:read',         // グループDM一覧の取得
+    'mpim:history',      // グループDMの履歴取得
+    'users:read',        // ユーザー情報の取得
+    'team:read'          // チーム情報の取得
+  ];
 
-  constructor(settingsManager: SettingsManager, cryptoManager?: CryptoManager, clientId?: string, clientSecret?: string) {
-    this.settingsManager = settingsManager;
-    this.cryptoManager = cryptoManager || new CryptoManager();
+  constructor(plugin: any, clientId?: string, clientSecret?: string) {
+    this.plugin = plugin;
     this.CLIENT_ID = clientId || process.env.SLACK_CLIENT_ID || 'your-slack-client-id';
     this.CLIENT_SECRET = clientSecret || process.env.SLACK_CLIENT_SECRET || 'your-slack-client-secret';
   }
@@ -106,29 +113,34 @@ export class SlackAuthManager {
   }
 
   async saveToken(token: string): Promise<void> {
-    const encryptedToken = this.cryptoManager.encrypt(token);
-    await this.settingsManager.updateSettings({
-      slackToken: encryptedToken,
-    });
+    this.plugin.settings.slackToken = token;
+    await this.plugin.saveSettings();
   }
 
   async getDecryptedToken(): Promise<string | null> {
-    const settings = this.settingsManager.getSettings();
-    
-    if (!settings.slackToken) {
-      return null;
-    }
-
     try {
-      return this.cryptoManager.decrypt(settings.slackToken);
+      if (!this.plugin.settings.slackToken) {
+        console.log('SlackAuthManager: No token found in settings');
+        return null;
+      }
+
+      console.log('SlackAuthManager: Token found, length:', this.plugin.settings.slackToken.length);
+      return this.plugin.settings.slackToken;
     } catch (error) {
-      throw new Error('トークンの復号化に失敗しました: ' + error.message);
+      console.error('SlackAuthManager: Error getting token:', error);
+      throw new Error('トークンの取得に失敗しました: ' + error.message);
     }
   }
 
   async validateToken(token: string): Promise<Result<any>> {
     try {
-      const response = await fetch('https://slack.com/api/auth.test', {
+      console.log('SlackAuthManager: Validating token...');
+      
+      // Obsidian環境では `requestUrl` を使用する
+      const { requestUrl } = require('obsidian');
+      
+      const response = await requestUrl({
+        url: 'https://slack.com/api/auth.test',
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -136,15 +148,17 @@ export class SlackAuthManager {
         },
       });
 
-      const data = await response.json();
+      console.log('SlackAuthManager: Validation response status:', response.status);
+      console.log('SlackAuthManager: Validation response data:', response.json);
 
-      if (data.ok) {
-        return { success: true, value: data };
+      if (response.json.ok) {
+        return { success: true, value: response.json };
       } else {
-        return { success: false, error: new Error(data.error) };
+        return { success: false, error: new Error(response.json.error || '認証に失敗しました') };
       }
     } catch (error) {
-      return { success: false, error };
+      console.error('SlackAuthManager: Validation error:', error);
+      return { success: false, error: error instanceof Error ? error : new Error('Unknown validation error') };
     }
   }
 
@@ -163,9 +177,8 @@ export class SlackAuthManager {
   }
 
   async logout(): Promise<void> {
-    await this.settingsManager.updateSettings({
-      slackToken: null,
-    });
+    this.plugin.settings.slackToken = '';
+    await this.plugin.saveSettings();
   }
 
   private async exchangeCodeForToken(code: string): Promise<SlackAuthResponse> {
@@ -176,7 +189,11 @@ export class SlackAuthManager {
       redirect_uri: this.REDIRECT_URI,
     });
 
-    const response = await fetch('https://slack.com/api/oauth.v2.access', {
+    // Obsidian環境では `requestUrl` を使用する
+    const { requestUrl } = require('obsidian');
+    
+    const response = await requestUrl({
+      url: 'https://slack.com/api/oauth.v2.access',
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -184,7 +201,7 @@ export class SlackAuthManager {
       body: params.toString(),
     });
 
-    return response.json();
+    return response.json;
   }
 
   private generateRandomString(length: number): string {

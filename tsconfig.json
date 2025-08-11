@@ -11,15 +11,14 @@
     "importHelpers": true,
     "declaration": true,
     "outDir": "lib",
-    "typeRoots": [
-      "node_modules/@types"
-    ],
-    "lib": [
-      "DOM",
-      "ES2020"
-    ]
+    "typeRoots": ["node_modules/@types"],
+    "lib": ["DOM", "ES2020"]
   },
-  "include": [
-    "**/*.ts"
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/__tests__/**/*",
+    "tests/**/*",
+    "**/*.test.ts",
+    "**/*.spec.ts"
   ]
 }

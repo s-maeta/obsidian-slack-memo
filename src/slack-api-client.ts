@@ -111,11 +111,27 @@ export class SlackAPIClient {
         }
 
         const data = response.value;
+        console.log(`SlackAPIClient: conversations.history response for ${channelId}:`, {
+          ok: data.ok,
+          messagesCount: data.messages?.length,
+          has_more: data.has_more,
+          response_metadata: data.response_metadata
+        });
+        
         if (!data.ok) {
           return {
             success: false,
             error: new Error(`Slack API error: ${data.error}`),
           };
+        }
+
+        if (data.messages && data.messages.length > 0) {
+          console.log(`SlackAPIClient: Sample messages:`, data.messages.slice(0, 3).map(m => ({
+            ts: m.ts,
+            user: m.user,
+            text: m.text?.substring(0, 100),
+            subtype: m.subtype
+          })));
         }
 
         messages.push(...data.messages);
@@ -128,6 +144,36 @@ export class SlackAPIClient {
       } while (cursor);
 
       return { success: true, value: messages };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error('Unknown error'),
+      };
+    }
+  }
+
+  // チャンネルに参加
+  async joinChannel(channelId: string): Promise<Result<boolean>> {
+    try {
+      const params: Record<string, string> = {
+        channel: channelId,
+      };
+
+      const response = await this.makePostRequest<SlackAPIResponse>('conversations.join', params);
+
+      if (!response.success) {
+        return response as Result<boolean>;
+      }
+
+      const data = response.value;
+      if (!data.ok) {
+        return {
+          success: false,
+          error: new Error(`Slack API error: ${data.error}`),
+        };
+      }
+
+      return { success: true, value: true };
     } catch (error) {
       return {
         success: false,
@@ -173,13 +219,33 @@ export class SlackAPIClient {
     params?: Record<string, string>
   ): Promise<Result<T>> {
     try {
+      console.log('SlackAPIClient: Making request to', endpoint);
       const token = await this.authManager.getDecryptedToken();
       if (!token) {
+        console.error('SlackAPIClient: No token available');
         return {
           success: false,
           error: new Error('認証トークンが設定されていません'),
         };
       }
+      
+      // トークンの形式をチェック（xoxe.xoxp- 形式にも対応）
+      const validTokenFormats = [
+        token.startsWith('xoxb-'),
+        token.startsWith('xoxp-'),
+        token.startsWith('xoxe-'),
+        token.startsWith('xoxe.xoxp-')
+      ];
+      
+      if (!validTokenFormats.some(valid => valid)) {
+        console.error('SlackAPIClient: Invalid token format. Token should start with xoxb-, xoxp-, xoxe-, or xoxe.xoxp-');
+        return {
+          success: false,
+          error: new Error('無効なトークン形式です。Slackトークンは xoxb-, xoxp-, xoxe-, または xoxe.xoxp- で始まる必要があります。'),
+        };
+      }
+      
+      console.log('SlackAPIClient: Token format valid, starting request');
 
       let retries = 0;
       let lastError: Error | null = null;
@@ -193,57 +259,63 @@ export class SlackAPIClient {
             });
           }
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
           try {
-            const response = await fetch(url.toString(), {
+            console.log('SlackAPIClient: Sending request to:', url.toString());
+            
+            // Obsidian環境では `requestUrl` を使用する
+            const { requestUrl } = require('obsidian');
+            
+            const response = await requestUrl({
+              url: url.toString(),
               method: 'GET',
               headers: {
                 'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
               },
-              signal: controller.signal,
             });
 
-            clearTimeout(timeoutId);
+            console.log('SlackAPIClient: Response status:', response.status);
 
-            // レート制限チェック
-            if (response.status === 429) {
-              if (retries >= this.maxRetries) {
-                return {
-                  success: false,
-                  error: new Error('レート制限: 最大リトライ回数を超えました'),
-                };
+            // エラーレスポンスをチェック
+            if (response.status < 200 || response.status >= 300) {
+              console.error('SlackAPIClient: HTTP error response:', response.status, response.text);
+              
+              // レート制限チェック
+              if (response.status === 429) {
+                if (retries >= this.maxRetries) {
+                  return {
+                    success: false,
+                    error: new Error('レート制限: 最大リトライ回数を超えました'),
+                  };
+                }
+
+                const retryAfterHeader = response.headers['retry-after'];
+                const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 1;
+                await this.handleRateLimit(retryAfter);
+                retries++;
+                continue;
               }
-
-              const retryAfterHeader = response.headers.get('retry-after');
-              const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 1;
-              await this.handleRateLimit(retryAfter);
-              retries++;
-              continue;
-            }
-
-            const data = await response.json() as T;
-            return { success: true, value: data };
-          } catch (error) {
-            clearTimeout(timeoutId);
-            
-            if (error.name === 'AbortError') {
+              
               return {
                 success: false,
-                error: new Error('リクエストがタイムアウトしました'),
+                error: new Error(`HTTP ${response.status}: ${response.text}`),
               };
             }
-            
+
+            const data = response.json as T;
+            console.log('SlackAPIClient: Response data:', data);
+            return { success: true, value: data };
+          } catch (error) {
             throw error;
           }
         } catch (error) {
           lastError = error instanceof Error ? error : new Error('Unknown error');
+          console.error('SlackAPIClient: Request error:', error);
           
-          if (error.message.includes('Network') || error.message.includes('fetch')) {
+          if (error.message.includes('Network') || error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
             return {
               success: false,
-              error: new Error('ネットワークエラーが発生しました'),
+              error: new Error(`ネットワークエラーが発生しました: ${error.message}`),
             };
           }
           
@@ -251,6 +323,7 @@ export class SlackAPIClient {
             break;
           }
           
+          console.log(`SlackAPIClient: Retrying request (${retries + 1}/${this.maxRetries})`);
           retries++;
           await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // 指数バックオフ
         }
@@ -260,6 +333,55 @@ export class SlackAPIClient {
         success: false,
         error: lastError || new Error('Unknown error'),
       };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error('Unknown error'),
+      };
+    }
+  }
+
+  // 内部メソッド: POST APIリクエストを実行
+  private async makePostRequest<T extends SlackAPIResponse>(
+    endpoint: string,
+    params?: Record<string, string>
+  ): Promise<Result<T>> {
+    try {
+      console.log('SlackAPIClient: Making POST request to', endpoint);
+      const token = await this.authManager.getDecryptedToken();
+      if (!token) {
+        return {
+          success: false,
+          error: new Error('認証トークンが設定されていません'),
+        };
+      }
+
+      // Create form data
+      const formData = new URLSearchParams();
+      if (params) {
+        Object.entries(params).forEach(([key, value]) => {
+          formData.append(key, value);
+        });
+      }
+
+      // Obsidian環境では `requestUrl` を使用する
+      const { requestUrl } = require('obsidian');
+      
+      const response = await requestUrl({
+        url: `${this.baseUrl}/${endpoint}`,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: formData.toString(),
+      });
+
+      console.log('SlackAPIClient: POST Response status:', response.status);
+      const data = response.json as T;
+      console.log('SlackAPIClient: POST Response data:', data);
+      
+      return { success: true, value: data };
     } catch (error) {
       return {
         success: false,

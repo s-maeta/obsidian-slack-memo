@@ -22,6 +22,32 @@ export interface PluginSettings {
   dailyNoteSettings: DailyNoteSettings;
   messageFormat: MessageFormatSettings;
   syncHistory: SyncHistory;
+  storageSettings: StorageSettings;
+}
+
+// ストレージ設定
+export interface StorageSettings {
+  baseFolder: string; // 基本フォルダ（例: "Slack Sync"）
+  organizationType: 'daily' | 'channel-daily' | 'channel-only'; // 整理方法
+  dailyPageSettings: DailyPageSettings;
+  channelPageSettings: ChannelPageSettings;
+}
+
+// 日付別ページ設定
+export interface DailyPageSettings {
+  enabled: boolean;
+  folderPath: string; // 日付別フォルダのパス（例: "{baseFolder}/Daily"）
+  fileNameFormat: string; // ファイル名形式（例: "{date}"）
+  pageHeaderFormat: string; // ページヘッダー形式
+  sectionHeaderFormat: string; // チャンネルセクションのヘッダー形式
+}
+
+// チャンネル別ページ設定  
+export interface ChannelPageSettings {
+  enabled: boolean;
+  folderPath: string; // チャンネル別フォルダのパス（例: "{baseFolder}/Channels/{channel}"）
+  fileNameFormat: string; // ファイル名形式（例: "{date}"）
+  pageHeaderFormat: string; // ページヘッダー形式
 }
 
 // チャンネルマッピング設定
@@ -85,5 +111,22 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     lastSyncTime: null,
     totalMessagesSynced: 0,
     channelLastSync: {},
+  },
+  storageSettings: {
+    baseFolder: 'Slack Sync',
+    organizationType: 'daily',
+    dailyPageSettings: {
+      enabled: true,
+      folderPath: '{baseFolder}/Daily',
+      fileNameFormat: '{date}',
+      pageHeaderFormat: '# {date} - Slack Messages',
+      sectionHeaderFormat: '## #{channel}'
+    },
+    channelPageSettings: {
+      enabled: false,
+      folderPath: '{baseFolder}/Channels/{channel}',
+      fileNameFormat: '{date}',
+      pageHeaderFormat: '# #{channel} - {date}'
+    }
   },
 };

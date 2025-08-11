@@ -26,7 +26,7 @@ import {
   BatchContext,
   ProcessingContext,
   BatchProcessingError,
-  MemoryLimitExceededError
+  MemoryLimitExceededError,
 } from './performance-types';
 
 // ===============================
@@ -52,17 +52,20 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
     return batches;
   }
 
-  public async processBatches(items: T[], executor: BatchExecutor<T, R>): Promise<BatchProcessingResult<R>> {
+  public async processBatches(
+    items: T[],
+    executor: BatchExecutor<T, R>
+  ): Promise<BatchProcessingResult<R>> {
     const startTime = Date.now();
     this.cancelled = false;
-    
+
     if (this.processingStartCallback) {
       this.processingStartCallback();
     }
 
     const batches = this.createBatches(items);
     const result: BatchProcessingResult<R> = this.initializeResult();
-    
+
     // 改善された並行処理実行
     await this.executeBatchesConcurrently(batches, executor, result);
 
@@ -89,13 +92,13 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
       batchErrors: [],
       cancelled: false,
       processingTime: 0,
-      averageProcessingTime: 0
+      averageProcessingTime: 0,
     };
   }
 
   private async executeBatchesConcurrently(
-    batches: T[][], 
-    executor: BatchExecutor<T, R>, 
+    batches: T[][],
+    executor: BatchExecutor<T, R>,
     result: BatchProcessingResult<R>
   ): Promise<void> {
     const activeBatches = new Set<Promise<void>>();
@@ -104,30 +107,25 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
     for (let i = 0; i < batches.length && !this.cancelled; i++) {
       // 並行数制御の改善
       while (activeBatches.size >= this.config.maxConcurrent) {
-        const completed = await Promise.race(activeBatches);
-        // 完了したPromiseをSetから削除
-        for (const batch of activeBatches) {
-          if (batch === completed) {
-            activeBatches.delete(batch);
-            break;
-          }
-        }
+        await Promise.race(activeBatches);
+        // The finally() handler below will clean up completed promises
+        // so we just need to wait for at least one to complete
       }
 
       if (this.cancelled) break;
 
       // バッチ処理の実行
       const batchPromise = this.processSingleBatch(
-        batches[i], 
-        i, 
+        batches[i],
+        i,
         batches.length,
         completedBatches,
-        executor, 
+        executor,
         result
       );
 
       activeBatches.add(batchPromise);
-      
+
       // バッチ完了時にSetから削除
       batchPromise.finally(() => {
         activeBatches.delete(batchPromise);
@@ -145,11 +143,11 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
   }
 
   private async processSingleBatch(
-    batch: T[], 
+    batch: T[],
     batchIndex: number,
     totalBatches: number,
     completedBatches: number,
-    executor: BatchExecutor<T, R>, 
+    executor: BatchExecutor<T, R>,
     result: BatchProcessingResult<R>
   ): Promise<void> {
     if (this.cancelled) return;
@@ -158,7 +156,7 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
       jobId: `batch-${batchIndex}-${Date.now()}`,
       totalBatches,
       completedBatches,
-      isCancelled: this.cancelled
+      isCancelled: this.cancelled,
     };
 
     let retryCount = 0;
@@ -167,12 +165,12 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
     while (retryCount <= this.config.retryCount && !success && !this.cancelled) {
       try {
         const batchResult = await this.executeWithTimeout(executor(batch, batchIndex, context));
-        
+
         if (batchResult.success) {
           result.totalProcessed += batchResult.processedItems;
           result.successfulBatches++;
           success = true;
-          
+
           if (this.batchCompleteCallback) {
             this.batchCompleteCallback(batchIndex, batchResult);
           }
@@ -195,7 +193,7 @@ export class BatchProcessor<T, R = T> implements IBatchProcessor<T, R> {
           result.failedBatches++;
           result.batchErrors.push({
             batchIndex,
-            error: error as Error
+            error: error as Error,
           });
           success = false;
           break;
@@ -285,18 +283,20 @@ export class MemoryManager implements IMemoryManager {
   private peakUsage: number = 0;
   private gcCount: number = 0;
   private leakDetections: number = 0;
-  private snapshots: Array<{name: string, usage: number, timestamp: Date}> = [];
+  private snapshots: Array<{ name: string; usage: number; timestamp: Date }> = [];
   private monitoringInterval?: NodeJS.Timeout;
   private memoryLeakCallback?: (leak: MemoryLeak) => void;
   private gcTriggeredCallback?: () => void;
 
-  constructor(config: MemoryManagerConfig = {
-    leakDetectionEnabled: true,
-    leakThresholdMB: 100,
-    gcThresholdMB: 200,
-    autoGCEnabled: true,
-    monitoringInterval: 5000
-  }) {
+  constructor(
+    config: MemoryManagerConfig = {
+      leakDetectionEnabled: true,
+      leakThresholdMB: 100,
+      gcThresholdMB: 200,
+      autoGCEnabled: true,
+      monitoringInterval: 5000,
+    }
+  ) {
     this.config = config;
     this.initialUsage = this.getCurrentUsage();
     this.peakUsage = this.initialUsage;
@@ -344,14 +344,18 @@ export class MemoryManager implements IMemoryManager {
         leakSize,
         threshold: thresholdBytes,
         detectionTime: new Date(),
-        stackTrace: this.getStackTrace()
+        stackTrace: this.getStackTrace(),
       };
 
       this.leakDetections++;
-      
+
       // リーク情報をログに記録
-      console.warn(`Memory leak detected: ${(leakSize / 1024 / 1024).toFixed(2)}MB exceeds threshold ${this.config.leakThresholdMB}MB`);
-      
+      console.warn(
+        `Memory leak detected: ${(leakSize / 1024 / 1024).toFixed(2)}MB exceeds threshold ${
+          this.config.leakThresholdMB
+        }MB`
+      );
+
       if (this.memoryLeakCallback) {
         this.memoryLeakCallback(leak);
       }
@@ -366,10 +370,14 @@ export class MemoryManager implements IMemoryManager {
     this.peakUsage = Math.max(this.peakUsage, currentUsage);
 
     if (this.config.autoGCEnabled && currentUsage > gcThresholdBytes) {
-      console.info(`Triggering GC: current usage ${(currentUsage / 1024 / 1024).toFixed(2)}MB exceeds threshold ${this.config.gcThresholdMB}MB`);
-      
+      console.info(
+        `Triggering GC: current usage ${(currentUsage / 1024 / 1024).toFixed(
+          2
+        )}MB exceeds threshold ${this.config.gcThresholdMB}MB`
+      );
+
       this.forceGC();
-      
+
       if (this.gcTriggeredCallback) {
         this.gcTriggeredCallback();
       }
@@ -396,7 +404,7 @@ export class MemoryManager implements IMemoryManager {
     this.snapshots.push({
       name,
       usage: this.getCurrentUsage(),
-      timestamp: new Date()
+      timestamp: new Date(),
     });
   }
 
@@ -408,7 +416,7 @@ export class MemoryManager implements IMemoryManager {
       memoryDelta: this.getMemoryDelta(),
       gcCount: this.gcCount,
       leakDetections: this.leakDetections,
-      snapshots: [...this.snapshots]
+      snapshots: [...this.snapshots],
     };
   }
 
@@ -444,11 +452,14 @@ export class MemoryManager implements IMemoryManager {
 export class PerformanceMonitor implements IPerformanceMonitor {
   private timers: Record<string, number> = {};
   private startTimes: Record<string, number> = {};
-  private throughputData: Record<string, {
-    itemCount: number;
-    startTime: Date;
-    endTime?: Date;
-  }> = {};
+  private throughputData: Record<
+    string,
+    {
+      itemCount: number;
+      startTime: Date;
+      endTime?: Date;
+    }
+  > = {};
   private memoryManager: MemoryManager;
   private cpuSamples: number[] = [];
   private cpuMonitoring: boolean = false;
@@ -476,18 +487,18 @@ export class PerformanceMonitor implements IPerformanceMonitor {
 
   public getMetrics(): PerformanceMetrics {
     const throughput: Record<string, ThroughputMetrics> = {};
-    
+
     Object.entries(this.throughputData).forEach(([name, data]) => {
-      const duration = data.endTime 
+      const duration = data.endTime
         ? data.endTime.getTime() - data.startTime.getTime()
         : Date.now() - data.startTime.getTime();
-      
+
       throughput[name] = {
         itemsPerSecond: duration > 0 ? (data.itemCount / duration) * 1000 : 0,
         totalItems: data.itemCount,
         startTime: data.startTime,
         endTime: data.endTime,
-        duration
+        duration,
       };
     });
 
@@ -499,18 +510,19 @@ export class PerformanceMonitor implements IPerformanceMonitor {
       batchesFailed: 0,
       averageProcessingTime: 0,
       memoryUsagePeak: this.memoryManager.getPeakUsage(),
-      cpuUsageAverage: this.cpuSamples.length > 0 
-        ? this.cpuSamples.reduce((a, b) => a + b, 0) / this.cpuSamples.length 
-        : 0,
+      cpuUsageAverage:
+        this.cpuSamples.length > 0
+          ? this.cpuSamples.reduce((a, b) => a + b, 0) / this.cpuSamples.length
+          : 0,
       timers: { ...this.timers },
-      throughput
+      throughput,
     };
   }
 
   public startThroughputMeasurement(name: string): void {
     this.throughputData[name] = {
       itemCount: 0,
-      startTime: new Date()
+      startTime: new Date(),
     };
   }
 
@@ -527,28 +539,28 @@ export class PerformanceMonitor implements IPerformanceMonitor {
         itemsPerSecond: 0,
         totalItems: 0,
         startTime: new Date(),
-        duration: 0
+        duration: 0,
       };
     }
 
     const now = new Date();
     const duration = now.getTime() - data.startTime.getTime();
-    
+
     return {
       itemsPerSecond: duration > 0 ? (data.itemCount / duration) * 1000 : 0,
       totalItems: data.itemCount,
       startTime: data.startTime,
       endTime: data.endTime,
-      duration
+      duration,
     };
   }
 
   public startCPUMonitoring(): void {
     if (this.cpuMonitoring) return;
-    
+
     this.cpuMonitoring = true;
     this.cpuSamples = [];
-    
+
     // 改善されたCPU使用率測定
     this.cpuInterval = setInterval(() => {
       this.sampleCPUUsage();
@@ -557,11 +569,11 @@ export class PerformanceMonitor implements IPerformanceMonitor {
 
   private sampleCPUUsage(): void {
     const startTime = performance.now();
-    
+
     // より一貫性のあるCPU負荷測定
     const iterations = 50000;
     let sum = 0;
-    
+
     for (let i = 0; i < iterations; i++) {
       // より実際的な計算負荷
       sum += Math.sqrt(i * Math.random());
@@ -570,18 +582,18 @@ export class PerformanceMonitor implements IPerformanceMonitor {
         break;
       }
     }
-    
+
     const endTime = performance.now();
     const executionTime = endTime - startTime;
-    
+
     // より現実的なCPU使用率の計算
     // 実行時間が長いほどCPU使用率が高いと推定
     const baseCpuUsage = Math.min(100, Math.max(0, executionTime * 3)); // 基本的な負荷
     const variance = Math.random() * 10 - 5; // ±5%のバリエーション
     const cpuUsage = Math.min(100, Math.max(0, baseCpuUsage + variance));
-    
+
     this.cpuSamples.push(cpuUsage);
-    
+
     // サンプル数の制限（メモリ使用量制御）
     if (this.cpuSamples.length > 1000) {
       this.cpuSamples = this.cpuSamples.slice(-500); // 最新500サンプルを保持
@@ -602,7 +614,7 @@ export class PerformanceMonitor implements IPerformanceMonitor {
         averageUsage: 0,
         peakUsage: 0,
         samples: [],
-        monitoringDuration: 0
+        monitoringDuration: 0,
       };
     }
 
@@ -610,7 +622,7 @@ export class PerformanceMonitor implements IPerformanceMonitor {
       averageUsage: this.cpuSamples.reduce((a, b) => a + b, 0) / this.cpuSamples.length,
       peakUsage: Math.max(...this.cpuSamples),
       samples: [...this.cpuSamples],
-      monitoringDuration: this.cpuSamples.length * 100
+      monitoringDuration: this.cpuSamples.length * 100,
     };
   }
 
@@ -665,7 +677,7 @@ export class ProgressTracker implements IProgressTracker {
   public updateProgress(processedItems: number): void {
     this.processedItems = processedItems;
     const progress = this.getProgress();
-    
+
     if (this.progressUpdateCallback) {
       this.progressUpdateCallback(progress);
     }
@@ -673,7 +685,7 @@ export class ProgressTracker implements IProgressTracker {
 
   public completeBatch(batchId: number, progress: number): void {
     this.batchProgresses.set(batchId, progress);
-    
+
     if (progress >= 100 && this.batchCompletedCallback) {
       this.batchCompletedCallback(batchId);
     }
@@ -707,19 +719,20 @@ export class ProgressTracker implements IProgressTracker {
     }
 
     const elapsed = Date.now() - this.startTime.getTime();
-    
+
     // 最小経過時間のチェック（初期の不正確な推定を避ける）
-    if (elapsed < 1000) { // 1秒未満の場合は推定しない
+    if (elapsed < 1000) {
+      // 1秒未満の場合は推定しない
       return 0;
     }
 
     const itemsPerMs = this.processedItems / elapsed;
     const remainingItems = this.config.totalItems - this.processedItems;
-    
+
     if (itemsPerMs <= 0) return 0;
-    
+
     const estimatedRemainingMs = remainingItems / itemsPerMs;
-    
+
     // 異常に長い推定時間の制限（24時間以内）
     const maxEstimateMs = 24 * 60 * 60 * 1000;
     return Math.min(estimatedRemainingMs, maxEstimateMs);
@@ -727,7 +740,7 @@ export class ProgressTracker implements IProgressTracker {
 
   public getProgressMetrics(): ProgressMetrics {
     const elapsedTime = this.startTime ? Date.now() - this.startTime.getTime() : 0;
-    
+
     return {
       totalItems: this.config.totalItems,
       processedItems: this.processedItems,
@@ -737,7 +750,7 @@ export class ProgressTracker implements IProgressTracker {
       estimatedRemainingTime: this.getEstimatedRemainingTime(),
       averageItemsPerSecond: elapsedTime > 0 ? (this.processedItems / elapsedTime) * 1000 : 0,
       startTime: this.startTime || new Date(),
-      elapsedTime
+      elapsedTime,
     };
   }
 
@@ -768,13 +781,13 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
   constructor(config: PerformanceOptimizerConfig) {
     this.config = { ...config };
     this.batchProcessor = new BatchProcessor<T, R>(config);
-    
+
     const memoryConfig: MemoryManagerConfig = {
       leakDetectionEnabled: config.memoryOptimization,
       leakThresholdMB: config.memoryThresholdMB,
       gcThresholdMB: config.memoryThresholdMB * 2,
       autoGCEnabled: config.memoryOptimization,
-      monitoringInterval: config.uiUpdateInterval
+      monitoringInterval: config.uiUpdateInterval,
     };
     this.memoryManager = new MemoryManager(memoryConfig);
     this.performanceMonitor = new PerformanceMonitor();
@@ -783,7 +796,7 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
   public async process(items: T[], executor: BatchExecutor<T, R>): Promise<ProcessingResult<R>> {
     // 初期化とバリデーション
     this.validateProcessingRequest(items, executor);
-    
+
     // 進捗トラッカーの初期化
     this.initializeProgressTracking(items.length);
 
@@ -803,7 +816,6 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
 
       // 結果の集約
       return this.generateFinalResult(batchResult);
-      
     } catch (error) {
       // 処理中エラーの適切な処理
       console.error('Processing failed:', error);
@@ -818,19 +830,19 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
     if (!items || !Array.isArray(items)) {
       throw new Error('Items must be a valid array');
     }
-    
+
     if (items.length === 0) {
       throw new Error('Items array cannot be empty');
     }
-    
+
     if (!executor || typeof executor !== 'function') {
       throw new Error('Executor must be a valid function');
     }
-    
+
     if (this.config.batchSize <= 0) {
       throw new Error('Batch size must be greater than 0');
     }
-    
+
     if (this.config.maxConcurrent <= 0) {
       throw new Error('Max concurrent batches must be greater than 0');
     }
@@ -840,11 +852,11 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
     this.progressTracker = new ProgressTracker({
       totalItems,
       batchSize: this.config.batchSize,
-      updateInterval: this.config.uiUpdateInterval
+      updateInterval: this.config.uiUpdateInterval,
     });
 
     // イベント設定
-    this.progressTracker.onProgressUpdate((progress) => {
+    this.progressTracker.onProgressUpdate(progress => {
       if (this.progressUpdateCallback) {
         // UIの更新間隔制御
         this.throttleUIUpdate(() => {
@@ -858,21 +870,24 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
     // メモリ監視開始
     this.memoryManager.startMemoryMonitoring();
     this.performanceMonitor.startMemoryMonitoring();
-    
+
     // CPU監視開始（オプション）
     if (this.config.memoryOptimization) {
       this.performanceMonitor.startCPUMonitoring();
     }
-    
+
     // 全体処理時間の測定開始
     this.performanceMonitor.startTimer('total-processing');
     this.performanceMonitor.startThroughputMeasurement('items-processing');
-    
+
     // 進捗追跡開始
     this.progressTracker!.start();
   }
 
-  private async executeProcessing(items: T[], executor: BatchExecutor<T, R>): Promise<BatchProcessingResult<R>> {
+  private async executeProcessing(
+    items: T[],
+    executor: BatchExecutor<T, R>
+  ): Promise<BatchProcessingResult<R>> {
     return await this.batchProcessor.processBatches(items, async (batch, batchIndex, context) => {
       // 進捗更新（より正確な計算）
       const processedSoFar = Math.min(batchIndex * this.config.batchSize, items.length);
@@ -883,7 +898,7 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
 
       // パフォーマンス測定の記録
       this.performanceMonitor.startTimer(`batch-${batchIndex}`);
-      
+
       try {
         // ユーザー定義の処理実行
         const result = await executor(batch, batchIndex, context);
@@ -895,7 +910,6 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
         }
 
         return result;
-        
       } finally {
         // バッチ処理時間の記録
         this.performanceMonitor.endTimer(`batch-${batchIndex}`);
@@ -907,12 +921,13 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
     // メモリ使用量のチェック
     this.memoryManager.checkMemoryUsage();
     this.memoryManager.checkMemoryLeaks();
-    
+
     // 必要に応じて処理速度の調整
     const currentMemory = this.memoryManager.getCurrentUsage();
     const memoryThresholdBytes = this.config.memoryThresholdMB * 1024 * 1024;
-    
-    if (currentMemory > memoryThresholdBytes * 0.8) { // 80%で警告
+
+    if (currentMemory > memoryThresholdBytes * 0.8) {
+      // 80%で警告
       console.warn(`High memory usage detected: ${(currentMemory / 1024 / 1024).toFixed(2)}MB`);
     }
   }
@@ -920,7 +935,7 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
   private throttleUIUpdate = (() => {
     let lastUpdate = 0;
     const minInterval = this.config.uiUpdateInterval || 100;
-    
+
     return (callback: () => void) => {
       const now = Date.now();
       if (now - lastUpdate >= minInterval) {
@@ -933,12 +948,12 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
   private generateFinalResult(batchResult: BatchProcessingResult<R>): ProcessingResult<R> {
     // モニタリング停止
     const totalProcessingTime = this.performanceMonitor.endTimer('total-processing');
-    
+
     // 最終メトリクスの収集
     const memoryMetrics = this.memoryManager.getMemoryMetrics();
     const performanceMetrics = this.performanceMonitor.getMetrics();
     const progressMetrics = this.progressTracker!.getProgressMetrics();
-    
+
     // 詳細な結果レポート
     const result: ProcessingResult<R> = {
       ...batchResult,
@@ -947,7 +962,7 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
       progressMetrics,
       configurationChanges: this.configurationChanges,
       finalBatchSize: this.config.batchSize,
-      finalMaxConcurrent: this.config.maxConcurrent
+      finalMaxConcurrent: this.config.maxConcurrent,
     };
 
     // 処理完了の通知
@@ -968,13 +983,8 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
   }
 
   private logPerformanceSummary(result: ProcessingResult<R>): void {
-    const {
-      totalProcessed,
-      totalFailed,
-      processingTime,
-      memoryMetrics,
-      performanceMetrics
-    } = result;
+    const { totalProcessed, totalFailed, processingTime, memoryMetrics, performanceMetrics } =
+      result;
 
     console.info('Processing completed:', {
       totalProcessed,
@@ -982,7 +992,7 @@ export class PerformanceOptimizer<T, R = T> implements IPerformanceOptimizer<T, 
       processingTimeMs: processingTime,
       averageTimePerItem: processingTime / Math.max(totalProcessed, 1),
       peakMemoryMB: (memoryMetrics.peakUsage / 1024 / 1024).toFixed(2),
-      averageCpuUsage: performanceMetrics.cpuUsageAverage.toFixed(1)
+      averageCpuUsage: performanceMetrics.cpuUsageAverage.toFixed(1),
     });
   }
 

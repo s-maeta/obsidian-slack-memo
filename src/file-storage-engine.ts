@@ -1,5 +1,5 @@
 import { App, TFile, TFolder } from 'obsidian';
-import { PluginSettings, ChannelMapping } from './types';
+import { PluginSettings, ChannelMapping, StorageSettings } from './types';
 import { Message as SlackMessage } from './slack-types';
 import { FileStorageOptions, StorageResult } from './file-storage-types';
 
@@ -28,17 +28,45 @@ export class FileStorageEngine {
     ) {}
 
     /**
-     * Determines the save path for a given channel
+     * Determines the save path for a given channel and date
      * @param channelId - Slack channel ID
+     * @param channelName - Slack channel name  
+     * @param messageDate - Date of the message
      * @returns Absolute path to save directory
-     * @throws Error if no mapping found and no default path configured
      */
-    determineSavePath(channelId: string): string {
-        const mapping = this.findChannelMapping(channelId);
-        const targetPath = mapping?.targetFolder ?? this.getDefaultPath();
-        
-        if (!targetPath) {
-            throw new Error(`No mapping found for channel ${channelId} and no default path configured`);
+    determineSavePath(channelId: string, channelName?: string, messageDate?: Date): string {
+        const storageSettings = this.settings.storageSettings;
+        const date = messageDate || new Date();
+        const dateString = this.formatDate(date);
+
+        let targetPath: string;
+
+        switch (storageSettings.organizationType) {
+            case 'daily':
+                targetPath = this.resolvePlaceholders(
+                    storageSettings.dailyPageSettings.folderPath, 
+                    { baseFolder: storageSettings.baseFolder, date: dateString, channel: channelName || channelId }
+                );
+                break;
+            
+            case 'channel-daily':
+                targetPath = this.resolvePlaceholders(
+                    storageSettings.channelPageSettings.folderPath,
+                    { baseFolder: storageSettings.baseFolder, date: dateString, channel: channelName || channelId }
+                );
+                break;
+            
+            case 'channel-only':
+                // Legacy behavior - use channel mapping if exists
+                const mapping = this.findChannelMapping(channelId);
+                targetPath = mapping?.targetFolder ?? this.resolvePlaceholders(
+                    storageSettings.channelPageSettings.folderPath,
+                    { baseFolder: storageSettings.baseFolder, date: dateString, channel: channelName || channelId }
+                );
+                break;
+            
+            default:
+                targetPath = storageSettings.baseFolder;
         }
 
         return this.normalizeToAbsolutePath(targetPath);
@@ -51,6 +79,20 @@ export class FileStorageEngine {
      */
     private findChannelMapping(channelId: string): ChannelMapping | undefined {
         return this.settings.channelMappings.find(m => m.channelId === channelId);
+    }
+
+    /**
+     * Resolves placeholders in path templates
+     * @param template - Path template with placeholders
+     * @param variables - Variables to substitute
+     * @returns Resolved path
+     */
+    private resolvePlaceholders(template: string, variables: Record<string, string>): string {
+        let result = template;
+        for (const [key, value] of Object.entries(variables)) {
+            result = result.replace(`{${key}}`, this.sanitizeFileName(value));
+        }
+        return result;
     }
 
     /**
@@ -74,11 +116,29 @@ export class FileStorageEngine {
      * Generates a filename based on message and channel information
      * @param message - Slack message object
      * @param channelName - Channel name
+     * @param messageDate - Date of the message
      * @returns Sanitized filename with .md extension
      */
-    generateFileName(message: SlackMessage, channelName: string): string {
-        const format = this.getFileNameFormat(channelName);
-        const variables = this.extractMessageVariables(message, channelName);
+    generateFileName(message: SlackMessage, channelName: string, messageDate?: Date): string {
+        const storageSettings = this.settings.storageSettings;
+        const date = messageDate || new Date(parseFloat(message.ts) * 1000);
+        const dateString = this.formatDate(date);
+        
+        let format: string;
+        
+        switch (storageSettings.organizationType) {
+            case 'daily':
+                format = storageSettings.dailyPageSettings.fileNameFormat;
+                break;
+            case 'channel-daily':
+            case 'channel-only':
+                format = storageSettings.channelPageSettings.fileNameFormat;
+                break;
+            default:
+                format = '{date}';
+        }
+        
+        const variables = this.extractMessageVariables(message, channelName, dateString);
         
         let fileName = this.replaceVariablesInFormat(format, variables);
         fileName = this.ensureMarkdownExtension(fileName);
@@ -110,15 +170,16 @@ export class FileStorageEngine {
      * Extracts variables from message for filename generation
      * @param message - Slack message object
      * @param channelName - Channel name
+     * @param dateString - Pre-formatted date string
      * @returns Object containing variable values
      */
-    private extractMessageVariables(message: SlackMessage, channelName: string): Record<string, string> {
+    private extractMessageVariables(message: SlackMessage, channelName: string, dateString?: string): Record<string, string> {
         const timestamp = parseFloat(message.ts);
         const date = new Date(timestamp * 1000);
         
         return {
             [FileStorageEngine.FILENAME_VARIABLES.CHANNEL]: this.sanitizeFileName(channelName),
-            [FileStorageEngine.FILENAME_VARIABLES.DATE]: this.formatDate(date),
+            [FileStorageEngine.FILENAME_VARIABLES.DATE]: dateString || this.formatDate(date),
             [FileStorageEngine.FILENAME_VARIABLES.TIMESTAMP]: Math.floor(timestamp).toString(),
             [FileStorageEngine.FILENAME_VARIABLES.USER]: message.user || 'unknown'
         };
@@ -327,7 +388,7 @@ export class FileStorageEngine {
     }
 
     /**
-     * Saves Slack message to file with all necessary processing
+     * Saves Slack message to organized file structure
      * @param options - File storage options
      * @returns Storage result with success status and metadata
      */
@@ -335,13 +396,26 @@ export class FileStorageEngine {
         try {
             this.validateSaveOptions(options);
             
-            const savePath = this.determineSavePath(options.channelId);
+            const messageDate = new Date(parseFloat(options.message.ts) * 1000);
+            const savePath = this.determineSavePath(options.channelId, options.channelName, messageDate);
             await this.ensureDirectoryExists(savePath);
             
-            const fileName = await this.generateUniqueFileName(options, savePath);
+            const fileName = this.generateFileName(options.message, options.channelName, messageDate);
             const fullFilePath = `${savePath}/${fileName}`;
             
-            await this.writeFile(fullFilePath, options.content);
+            // Handle different organization types
+            const storageSettings = this.settings.storageSettings;
+            
+            switch (storageSettings.organizationType) {
+                case 'daily':
+                    await this.saveToDaily(fullFilePath, options, messageDate);
+                    break;
+                case 'channel-daily':
+                    await this.saveToChannelDaily(fullFilePath, options, messageDate);
+                    break;
+                default:
+                    await this.writeFile(fullFilePath, options.content);
+            }
             
             const appendedToDailyNote = await this.handleDailyNoteAppending(options);
             
@@ -349,6 +423,100 @@ export class FileStorageEngine {
             
         } catch (error) {
             return this.createErrorResult(error as Error);
+        }
+    }
+
+    /**
+     * Save message to daily organized structure
+     */
+    private async saveToDaily(filePath: string, options: FileStorageOptions, messageDate: Date): Promise<void> {
+        const storageSettings = this.settings.storageSettings.dailyPageSettings;
+        const dateString = this.formatDate(messageDate);
+        
+        const pageHeader = this.resolvePlaceholders(storageSettings.pageHeaderFormat, {
+            date: dateString,
+            channel: options.channelName
+        });
+        
+        const sectionHeader = this.resolvePlaceholders(storageSettings.sectionHeaderFormat, {
+            date: dateString,
+            channel: options.channelName
+        });
+        
+        const fileExists = await this.app.vault.adapter.exists(filePath);
+        
+        if (fileExists) {
+            // Append to existing daily page
+            await this.appendToDaily(filePath, options, sectionHeader);
+        } else {
+            // Create new daily page
+            const content = `${pageHeader}\n\n${sectionHeader}\n\n${options.content}`;
+            await this.app.vault.create(filePath, content);
+        }
+    }
+
+    /**
+     * Save message to channel-daily organized structure
+     */
+    private async saveToChannelDaily(filePath: string, options: FileStorageOptions, messageDate: Date): Promise<void> {
+        const storageSettings = this.settings.storageSettings.channelPageSettings;
+        const dateString = this.formatDate(messageDate);
+        
+        const pageHeader = this.resolvePlaceholders(storageSettings.pageHeaderFormat, {
+            date: dateString,
+            channel: options.channelName
+        });
+        
+        const fileExists = await this.app.vault.adapter.exists(filePath);
+        
+        if (fileExists) {
+            // Append to existing channel-daily page
+            const file = this.app.vault.getAbstractFileByPath(filePath) as TFile;
+            const existingContent = await this.app.vault.read(file);
+            
+            if (!existingContent.includes(options.content)) {
+                await this.app.vault.append(file, '\n\n' + options.content);
+            }
+        } else {
+            // Create new channel-daily page
+            const content = `${pageHeader}\n\n${options.content}`;
+            await this.app.vault.create(filePath, content);
+        }
+    }
+
+    /**
+     * Append message to existing daily page with section management
+     */
+    private async appendToDaily(filePath: string, options: FileStorageOptions, sectionHeader: string): Promise<void> {
+        const file = this.app.vault.getAbstractFileByPath(filePath) as TFile;
+        const existingContent = await this.app.vault.read(file);
+        
+        // Check if content already exists
+        if (existingContent.includes(options.content)) {
+            return;
+        }
+        
+        // Check if section exists
+        if (existingContent.includes(sectionHeader)) {
+            // Append to existing section
+            const lines = existingContent.split('\n');
+            const sectionIndex = lines.findIndex(line => line.includes(sectionHeader));
+            
+            // Find the end of this section (next ## header or end of file)
+            let insertIndex = lines.length;
+            for (let i = sectionIndex + 1; i < lines.length; i++) {
+                if (lines[i].startsWith('##')) {
+                    insertIndex = i;
+                    break;
+                }
+            }
+            
+            // Insert the new content before the next section
+            lines.splice(insertIndex, 0, '', options.content);
+            await this.app.vault.modify(file, lines.join('\n'));
+        } else {
+            // Add new section
+            await this.app.vault.append(file, `\n\n${sectionHeader}\n\n${options.content}`);
         }
     }
 

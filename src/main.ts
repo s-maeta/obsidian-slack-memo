@@ -1,13 +1,8 @@
-import {
-  App,
-  Editor,
-  MarkdownView,
-  Modal,
-  Notice,
-  Plugin,
-  PluginSettingTab,
-  Setting,
-} from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { SlackAuthManager } from './slack-auth';
+import { SlackAPIClient } from './slack-api-client';
+import { MarkdownConverter } from './markdown-converter';
+import { isError } from './types';
 
 // Slack Sync Plugin Interfaces
 interface SlackSyncSettings {
@@ -16,6 +11,16 @@ interface SlackSyncSettings {
   syncInterval: number;
   notificationLevel: 'all' | 'errors' | 'none';
   autoSync: boolean;
+  channelMappings: any[];
+  dailyNoteSettings: any;
+  messageFormat: any;
+  syncHistory: any;
+  storageSettings?: {
+    baseFolder: string;
+    organizationType: string;
+    dailyPageSettings: any;
+    channelPageSettings: any;
+  };
 }
 
 const DEFAULT_SETTINGS: SlackSyncSettings = {
@@ -24,16 +29,33 @@ const DEFAULT_SETTINGS: SlackSyncSettings = {
   syncInterval: 300000, // 5分
   notificationLevel: 'all',
   autoSync: false,
+  channelMappings: [],
+  dailyNoteSettings: {},
+  messageFormat: {},
+  syncHistory: {},
+  storageSettings: {
+    baseFolder: 'Slack Sync',
+    organizationType: 'daily',
+    dailyPageSettings: {},
+    channelPageSettings: {}
+  }
 };
 
 export default class SlackSyncPlugin extends Plugin {
   settings: SlackSyncSettings;
+  private authManager: SlackAuthManager;
+  private apiClient: SlackAPIClient;
+  private markdownConverter: MarkdownConverter;
+  private autoSyncInterval: NodeJS.Timeout | null = null;
 
   async onload() {
     await this.loadSettings();
+    
+    // Initialize core components
+    await this.initializeComponents();
 
     // Slack同期アイコンをリボンに追加
-    const ribbonIconEl = this.addRibbonIcon('sync', 'Slack同期', (evt: MouseEvent) => {
+    const ribbonIconEl = this.addRibbonIcon('sync', 'Slack同期', () => {
       this.startManualSync();
     });
     ribbonIconEl.addClass('slack-sync-ribbon-class');
@@ -111,52 +133,291 @@ export default class SlackSyncPlugin extends Plugin {
   }
 
   onunload() {
-    // 自動同期のクリーンアップ処理があればここに追加
+    // 自動同期のクリーンアップ処理
+    this.stopAutoSync();
   }
 
   async loadSettings() {
+    // レガシー設定システム用（下位互換性のため）
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
 
   async saveSettings() {
+    // レガシー設定システム用（下位互換性のため）
     await this.saveData(this.settings);
+  }
+
+  // Initialize core components
+  private async initializeComponents(): Promise<void> {
+    this.authManager = new SlackAuthManager(this);
+    this.apiClient = new SlackAPIClient(this.authManager);
+    this.markdownConverter = new MarkdownConverter({
+      convertMentions: true,
+      convertLinks: true,
+      convertEmojis: true,
+    });
+
+    // 自動同期が有効な場合は起動時に開始
+    if (this.settings.slackToken && this.settings.autoSync) {
+      await this.startAutoSync();
+    }
   }
 
   // コマンド実装: 手動同期を実行
   private async startManualSync(): Promise<void> {
     new Notice('Slack同期を開始します...');
-    
+
     try {
       if (!this.settings.slackToken) {
-        new Notice('SlackトークンがNeed設定されていません。設定画面で設定してください。', 5000);
+        new Notice('Slackトークンが設定されていません。設定画面で設定してください。', 5000);
         this.openSettings();
         return;
       }
 
-      // TODO: 実際の同期処理をここに実装
-      // - SyncStatusManager を使用した状態管理
-      // - SlackClient を使用したデータ取得
-      // - Obsidian vault への保存
+      // トークンの有効性を最初にテスト
+      new Notice('Slackトークンを検証しています...');
+      const token = await this.authManager.getDecryptedToken();
+      if (token) {
+        const validation = await this.authManager.validateToken(token);
+        if (isError(validation)) {
+          new Notice('Slackトークンが無効です。設定を確認してください。', 5000);
+          console.error('Token validation failed:', validation.error);
+          return;
+        }
+        new Notice('トークン検証成功。チャンネル一覧を取得しています...');
+      }
+
+      // Get channels list
+      const channelsResult = await this.apiClient.listChannels({
+        types: 'public_channel,private_channel',
+        exclude_archived: true
+      });
+
+      if (isError(channelsResult)) {
+        throw channelsResult.error;
+      }
+
+      const channels = channelsResult.value;
+      console.log(`Found ${channels.length} channels:`, channels.map(c => ({ name: c.name, id: c.id, is_member: c.is_member })));
       
-      new Notice('Slack同期が完了しました！');
+      let totalMessages = 0;
+
+      // Process each channel
+      for (const channel of channels) {
+        console.log(`Processing channel: ${channel.name} (${channel.id}), is_member: ${channel.is_member}`);
+        
+        // メンバーでない場合は参加を試みる
+        if (!channel.is_member) {
+          console.log(`Attempting to join channel ${channel.name}...`);
+          try {
+            const joinResult = await this.apiClient.joinChannel(channel.id);
+            if (isError(joinResult)) {
+              console.warn(`Failed to join channel ${channel.name}: ${joinResult.error.message}`);
+              console.log(`Skipping channel ${channel.name} - could not join`);
+              continue;
+            } else {
+              console.log(`✓ Successfully joined channel ${channel.name}`);
+              new Notice(`チャンネル ${channel.name} に参加しました`);
+            }
+          } catch (error) {
+            console.warn(`Error joining channel ${channel.name}:`, error);
+            continue;
+          }
+        }
+        
+        // チャンネル同期を実行
+        try {
+          const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
+          console.log(`Channel ${channel.name} processed ${messageCount} messages`);
+          totalMessages += messageCount;
+        } catch (error) {
+          console.error(`Error syncing channel ${channel.name}:`, error);
+          new Notice(`チャンネル ${channel.name} の同期でエラー: ${error.message}`, 3000);
+        }
+      }
+
+      // Update sync history (simplified)
+      console.log(`Sync completed at: ${new Date().toISOString()}`);
+      
+      new Notice(`Slack同期が完了しました！ ${totalMessages} メッセージを処理しました。`);
     } catch (error) {
-      new Notice(`同期エラー: ${error.message}`, 5000);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      new Notice(`同期エラー: ${errorMessage}`, 5000);
       console.error('Slack sync error:', error);
     }
   }
 
+  // テスト用: メッセージをファイルに保存
+  private async saveMessageToFile(channelName: string, messageContent: string): Promise<void> {
+    const baseFolder = this.settings.storageSettings?.baseFolder || 'Slack Sync';
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const filePath = `${baseFolder}/Daily/${today}.md`;
+    
+    // ファイルが存在するかチェック
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    let content = '';
+    
+    if (file && file instanceof TFile) {
+      content = await this.app.vault.read(file);
+    } else {
+      // ディレクトリを作成
+      const folderPath = `${baseFolder}/Daily`;
+      const folder = this.app.vault.getAbstractFileByPath(folderPath);
+      if (!folder) {
+        await this.app.vault.createFolder(folderPath);
+      }
+      // ヘッダーを追加
+      content = `# ${today} - Slack Messages\n\n`;
+    }
+    
+    // チャンネルセクションを追加/更新
+    const channelHeader = `## #${channelName}`;
+    if (!content.includes(channelHeader)) {
+      content += `${channelHeader}\n\n`;
+    }
+    
+    content += `${messageContent}\n\n`;
+    
+    // ファイルを作成または更新
+    if (file && file instanceof TFile) {
+      await this.app.vault.modify(file, content);
+    } else {
+      await this.app.vault.create(filePath, content);
+    }
+  }
+
+  // チャンネル同期処理
+  private async syncChannel(channelId: string, channelName: string): Promise<number> {
+    console.log(`Starting sync for channel: ${channelName} (${channelId})`);
+    
+    // テスト用: 過去7日間のメッセージを取得（より多くのメッセージを確実に取得するため）
+    const lastWeek = new Date();
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    const lastSyncTime = (lastWeek.getTime() / 1000).toString();
+    
+    console.log(`Fetching messages since: ${new Date(lastWeek).toISOString()} (timestamp: ${lastSyncTime})`);
+    
+    // Get channel history
+    const historyOptions: any = {
+      limit: 100
+    };
+    
+    // Get messages after last sync time
+    historyOptions.oldest = lastSyncTime;
+
+    const historyResult = await this.apiClient.getChannelHistory(channelId, historyOptions);
+    
+    if (isError(historyResult)) {
+      throw historyResult.error;
+    }
+
+    const messages = historyResult.value;
+    console.log(`Found ${messages.length} messages in channel ${channelName}`);
+    
+    let processedCount = 0;
+
+    // Process each message
+    for (const message of messages) {
+      console.log(`Processing message: ${message.ts}, text: ${message.text?.substring(0, 50)}..., subtype: ${message.subtype}, user: ${message.user}`);
+      
+      // テスト用: より多くのメッセージタイプを処理する
+      if (message.text) { // subtypeの条件を一時的に削除してテスト
+        try {
+          // Convert message to markdown
+          const conversionResult = await this.markdownConverter.convertMessage(message, channelId);
+          
+          // Format the message content
+          const messageContent = await this.formatMessageContent(message, channelName, conversionResult.markdown);
+          
+          // Save the message - テスト用に実際にファイルに保存
+          try {
+            await this.saveMessageToFile(channelName, messageContent);
+            console.log(`✓ Saved message from ${channelName}: ${messageContent.substring(0, 100)}...`);
+            processedCount++;
+          } catch (saveError) {
+            console.error(`Failed to save message to file:`, saveError);
+          }
+        } catch (error) {
+          console.warn(`Failed to process message ${message.ts} in channel ${channelName}:`, error);
+        }
+      }
+    }
+
+    // Update channel sync history (simplified)
+    if (processedCount > 0) {
+      console.log(`Channel ${channelName} sync completed: ${processedCount} messages`);
+    }
+
+    return processedCount;
+  }
+
+  // Format message content for display
+  private async formatMessageContent(message: any, channelName: string, markdownText: string): Promise<string> {
+    const timestamp = new Date(parseFloat(message.ts) * 1000);
+    const timeString = timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const userName = message.user ? `@${message.user}` : '';
+    
+    // Build the formatted content
+    const metadata = [timeString, userName].filter(Boolean).join(' ');
+    const content = `**${metadata}**\n\n${markdownText}`;
+    
+    return content;
+  }
+
   // コマンド実装: 特定チャンネル同期モーダルを開く
   private openChannelSyncModal(): void {
-    new ChannelSyncModal(this.app, this.settings.defaultChannels, async (selectedChannel: string) => {
-      new Notice(`チャンネル "${selectedChannel}" を同期します...`);
-      
-      try {
-        // TODO: 特定チャンネルの同期処理を実装
-        new Notice(`チャンネル "${selectedChannel}" の同期が完了しました！`);
-      } catch (error) {
-        new Notice(`チャンネル同期エラー: ${error.message}`, 5000);
+    new ChannelSyncModal(
+      this.app,
+      this.settings.defaultChannels,
+      async (selectedChannel: string) => {
+        await this.syncSpecificChannel(selectedChannel);
       }
-    }).open();
+    ).open();
+  }
+
+  // 特定チャンネルの同期処理
+  private async syncSpecificChannel(channelName: string): Promise<void> {
+    new Notice(`チャンネル "${channelName}" を同期します...`);
+
+    try {
+      if (!this.settings.slackToken) {
+        new Notice('Slackトークンが設定されていません。設定画面で設定してください。', 5000);
+        this.openSettings();
+        return;
+      }
+
+      // Find channel by name
+      const channelsResult = await this.apiClient.listChannels({
+        types: 'public_channel,private_channel',
+        exclude_archived: true
+      });
+
+      if (isError(channelsResult)) {
+        throw channelsResult.error;
+      }
+
+      const channel = channelsResult.value.find(ch => 
+        ch.name === channelName.replace('#', '') || ch.id === channelName
+      );
+
+      if (!channel) {
+        new Notice(`チャンネル "${channelName}" が見つかりませんでした。`, 3000);
+        return;
+      }
+
+      if (!channel.is_member) {
+        new Notice(`チャンネル "${channelName}" のメンバーではありません。`, 3000);
+        return;
+      }
+
+      const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
+      new Notice(`チャンネル "${channelName}" の同期が完了しました！${messageCount} メッセージを処理しました。`);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      new Notice(`チャンネル同期エラー: ${errorMessage}`, 5000);
+      console.error('Channel sync error:', error);
+    }
   }
 
   // コマンド実装: 同期履歴を表示
@@ -171,17 +432,16 @@ export default class SlackSyncPlugin extends Plugin {
     this.app.setting?.open?.();
     // @ts-ignore - Obsidian APIの型定義が不完全な場合があるため
     this.app.setting?.openTabById?.(this.manifest.id);
-    
+
     // 代替案: 通知でユーザーに案内
     new Notice('設定 → Community plugins → Slack Sync で設定を変更してください');
   }
 
   // コマンド実装: 同期状態を確認
   private checkSyncStatus(): void {
-    // TODO: 実際の同期状態を確認
-    const status = '待機中'; // SyncStatusManager から取得
-    const lastSync = '未実行'; // 最後の同期時刻を取得
-    
+    const status = this.autoSyncInterval ? '自動同期中' : '待機中';
+    const lastSync = '未実行'; // 簡略化
+
     new Notice(`同期状態: ${status}\n最終同期: ${lastSync}`);
   }
 
@@ -189,14 +449,92 @@ export default class SlackSyncPlugin extends Plugin {
   private async toggleAutoSync(): Promise<void> {
     this.settings.autoSync = !this.settings.autoSync;
     await this.saveSettings();
-    
+
     const status = this.settings.autoSync ? 'オン' : 'オフ';
     new Notice(`自動同期を${status}にしました`);
 
     if (this.settings.autoSync) {
-      // TODO: 自動同期のスケジューリング開始
+      await this.startAutoSync();
     } else {
-      // TODO: 自動同期のスケジューリング停止
+      this.stopAutoSync();
+    }
+  }
+
+  // 自動同期の開始
+  private async startAutoSync(): Promise<void> {
+    if (!this.settings.slackToken) {
+      new Notice('Slackトークンが設定されていません。自動同期を開始できません。', 5000);
+      return;
+    }
+
+    this.stopAutoSync(); // 既存のタイマーをクリア
+
+    const intervalMs = this.settings.syncInterval; // ミリ秒
+    
+    this.autoSyncInterval = setInterval(async () => {
+      try {
+        console.log('Auto sync started');
+        await this.performBackgroundSync();
+      } catch (error) {
+        console.error('Auto sync error:', error);
+        new Notice('自動同期でエラーが発生しました。ログを確認してください。', 3000);
+      }
+    }, intervalMs);
+
+    new Notice(`自動同期を開始しました（${this.settings.syncInterval / 60000}分間隔）`);
+  }
+
+  // 自動同期の停止
+  private stopAutoSync(): void {
+    if (this.autoSyncInterval) {
+      clearInterval(this.autoSyncInterval);
+      this.autoSyncInterval = null;
+    }
+  }
+
+  // バックグラウンド同期処理（通知を最小限に）
+  private async performBackgroundSync(): Promise<void> {
+    if (!this.settings.slackToken) {
+      return;
+    }
+
+    try {
+      // Get channels list
+      const channelsResult = await this.apiClient.listChannels({
+        types: 'public_channel,private_channel',
+        exclude_archived: true
+      });
+
+      if (isError(channelsResult)) {
+        throw channelsResult.error;
+      }
+
+      const channels = channelsResult.value;
+      let totalMessages = 0;
+
+      // Process each channel (limit to reduce load)
+      const memberChannels = channels.filter(ch => ch.is_member).slice(0, 10); // 最大10チャンネル
+      
+      for (const channel of memberChannels) {
+        try {
+          const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
+          totalMessages += messageCount;
+        } catch (error) {
+          console.warn(`Background sync error for channel ${channel.name}:`, error);
+        }
+      }
+
+      // Update sync history (simplified)
+      console.log(`Sync completed at: ${new Date().toISOString()}`);
+      
+      // Only show notification if messages were found
+      if (totalMessages > 0) {
+        new Notice(`自動同期完了: ${totalMessages} 新着メッセージ`, 2000);
+      }
+      
+      console.log(`Background sync completed: ${totalMessages} messages processed`);
+    } catch (error) {
+      console.error('Background sync error:', error);
     }
   }
 }
@@ -218,19 +556,19 @@ class ChannelSyncModal extends Modal {
 
     // チャンネル一覧を表示
     const channelList = contentEl.createEl('div', { cls: 'channel-list' });
-    
+
     if (this.channels.length === 0) {
-      channelList.createEl('p', { 
-        text: '設定でデフォルトチャンネルを指定してください。', 
-        cls: 'no-channels-message' 
+      channelList.createEl('p', {
+        text: '設定でデフォルトチャンネルを指定してください。',
+        cls: 'no-channels-message',
       });
     } else {
       this.channels.forEach(channel => {
-        const channelEl = channelList.createEl('div', { 
+        const channelEl = channelList.createEl('div', {
           cls: 'channel-item',
-          text: `# ${channel}`
+          text: `# ${channel}`,
         });
-        
+
         channelEl.addEventListener('click', () => {
           this.onSubmit(channel);
           this.close();
@@ -241,16 +579,16 @@ class ChannelSyncModal extends Modal {
     // 手動入力オプション
     const manualSection = contentEl.createEl('div', { cls: 'manual-input' });
     manualSection.createEl('h3', { text: 'または手動入力:' });
-    
-    const inputEl = manualSection.createEl('input', { 
+
+    const inputEl = manualSection.createEl('input', {
       type: 'text',
       placeholder: 'チャンネル名を入力 (例: general)',
-      cls: 'channel-input'
+      cls: 'channel-input',
     });
 
-    const submitBtn = manualSection.createEl('button', { 
+    const submitBtn = manualSection.createEl('button', {
       text: '同期実行',
-      cls: 'mod-cta'
+      cls: 'mod-cta',
     });
 
     submitBtn.addEventListener('click', () => {
@@ -262,7 +600,7 @@ class ChannelSyncModal extends Modal {
     });
 
     // Enterキーでも実行
-    inputEl.addEventListener('keypress', (e) => {
+    inputEl.addEventListener('keypress', e => {
       if (e.key === 'Enter') {
         submitBtn.click();
       }
@@ -287,7 +625,7 @@ class SyncHistoryModal extends Modal {
 
     // TODO: 実際の履歴データを取得して表示
     const historyContainer = contentEl.createEl('div', { cls: 'sync-history' });
-    
+
     // モックデータで表示例
     const mockHistory = [
       { time: '2025-01-11 14:30', status: 'success', channel: 'general', messages: 15 },
@@ -299,30 +637,32 @@ class SyncHistoryModal extends Modal {
       historyContainer.createEl('p', { text: '同期履歴がありません。' });
     } else {
       mockHistory.forEach(item => {
-        const historyItem = historyContainer.createEl('div', { cls: `history-item ${item.status}` });
-        
+        const historyItem = historyContainer.createEl('div', {
+          cls: `history-item ${item.status}`,
+        });
+
         const statusIcon = item.status === 'success' ? '✅' : '❌';
-        historyItem.createEl('span', { 
+        historyItem.createEl('span', {
           text: `${statusIcon} ${item.time}`,
-          cls: 'history-time'
+          cls: 'history-time',
         });
-        
-        historyItem.createEl('span', { 
+
+        historyItem.createEl('span', {
           text: `# ${item.channel}`,
-          cls: 'history-channel'
+          cls: 'history-channel',
         });
-        
-        historyItem.createEl('span', { 
+
+        historyItem.createEl('span', {
           text: `${item.messages} メッセージ`,
-          cls: 'history-messages'
+          cls: 'history-messages',
         });
       });
     }
 
     // 閉じるボタン
-    const closeBtn = contentEl.createEl('button', { 
+    const closeBtn = contentEl.createEl('button', {
       text: '閉じる',
-      cls: 'mod-cta'
+      cls: 'mod-cta',
     });
     closeBtn.addEventListener('click', () => this.close());
   }
@@ -348,6 +688,7 @@ class SlackSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl('h2', { text: 'Slack同期設定' });
 
+
     // Slackトークン設定
     new Setting(containerEl)
       .setName('Slackトークン')
@@ -355,10 +696,18 @@ class SlackSyncSettingTab extends PluginSettingTab {
       .addText(text =>
         text
           .setPlaceholder('xoxb-your-token-here')
-          .setValue(this.plugin.settings.slackToken)
-          .onChange(async (value) => {
-            this.plugin.settings.slackToken = value;
-            await this.plugin.saveSettings();
+          .setValue(this.plugin.settings.slackToken || '')
+          .onChange(async value => {
+            try {
+              console.log('Setting Slack token, length:', value.length);
+              this.plugin.settings.slackToken = value;
+              await this.plugin.saveSettings();
+              console.log('Token saved successfully');
+              new Notice('Slackトークンが保存されました', 2000);
+            } catch (error) {
+              console.error('Error saving token:', error);
+              new Notice('トークンの保存に失敗しました', 3000);
+            }
           })
       );
 
@@ -370,7 +719,7 @@ class SlackSyncSettingTab extends PluginSettingTab {
         text
           .setPlaceholder('general,random,dev')
           .setValue(this.plugin.settings.defaultChannels.join(','))
-          .onChange(async (value) => {
+          .onChange(async value => {
             this.plugin.settings.defaultChannels = value
               .split(',')
               .map(ch => ch.trim())
@@ -388,7 +737,7 @@ class SlackSyncSettingTab extends PluginSettingTab {
           .setLimits(1, 60, 1)
           .setValue(this.plugin.settings.syncInterval / 60000)
           .setDynamicTooltip()
-          .onChange(async (value) => {
+          .onChange(async value => {
             this.plugin.settings.syncInterval = value * 60000;
             await this.plugin.saveSettings();
           })
@@ -404,7 +753,7 @@ class SlackSyncSettingTab extends PluginSettingTab {
           .addOption('errors', 'エラーのみ')
           .addOption('none', 'なし')
           .setValue(this.plugin.settings.notificationLevel)
-          .onChange(async (value) => {
+          .onChange(async value => {
             this.plugin.settings.notificationLevel = value as 'all' | 'errors' | 'none';
             await this.plugin.saveSettings();
           })
@@ -415,18 +764,18 @@ class SlackSyncSettingTab extends PluginSettingTab {
       .setName('自動同期')
       .setDesc('バックグラウンドでの自動同期を有効にする')
       .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.autoSync)
-          .onChange(async (value) => {
-            this.plugin.settings.autoSync = value;
-            await this.plugin.saveSettings();
+        toggle.setValue(this.plugin.settings.autoSync).onChange(async value => {
+          this.plugin.settings.autoSync = value;
+          await this.plugin.saveSettings();
 
-            if (value) {
-              new Notice('自動同期を有効にしました');
-            } else {
-              new Notice('自動同期を無効にしました');
-            }
-          })
+          if (value) {
+            new Notice('自動同期を有効にしました');
+          } else {
+            new Notice('自動同期を無効にしました');
+          }
+        })
       );
+
   }
+
 }
