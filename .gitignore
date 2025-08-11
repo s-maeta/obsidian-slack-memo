@@ -57,3 +57,22 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Obsidian plugin settings (contains sensitive information)
+data.json
+
+# AI Code assistants settings (may contain sensitive information)
+.claude/
+.kiro/
+.serena/
+
+# Development and testing files
+*.local
+*.private
+.env.local
+.env.production.local
+
+# Backup and temporary files
+*.bak
+*.tmp
+*~

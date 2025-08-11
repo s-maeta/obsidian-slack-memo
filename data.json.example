@@ -1,0 +1,48 @@
+{
+  "slackToken": "xoxb-YOUR-BOT-TOKEN-HERE",
+  "defaultChannels": [
+    "general",
+    "your-channel-name"
+  ],
+  "syncInterval": 60000,
+  "notificationLevel": "all",
+  "autoSync": false,
+  "channelMappings": [],
+  "dailyNoteSettings": {
+    "enabled": false,
+    "folder": "Daily Notes",
+    "dateFormat": "YYYY-MM-DD",
+    "headerFormat": "## Slack Messages - {{date}}",
+    "appendToExisting": true
+  },
+  "messageFormat": {
+    "includeTimestamp": true,
+    "includeUserName": true,
+    "includeChannelName": false,
+    "timestampFormat": "HH:mm",
+    "convertMentions": true,
+    "preserveEmojis": true
+  },
+  "syncHistory": {
+    "lastSyncTime": null,
+    "totalMessagesSynced": 0,
+    "channelLastSync": {}
+  },
+  "storageSettings": {
+    "baseFolder": "Slack Sync",
+    "organizationType": "daily",
+    "dailyPageSettings": {
+      "enabled": true,
+      "folderPath": "{baseFolder}/Daily",
+      "fileNameFormat": "{date}",
+      "pageHeaderFormat": "# {date} - Slack Messages",
+      "sectionHeaderFormat": "## #{channel}"
+    },
+    "channelPageSettings": {
+      "enabled": false,
+      "folderPath": "{baseFolder}/Channels/{channel}",
+      "fileNameFormat": "{date}",
+      "pageHeaderFormat": "# #{channel} - {date}"
+    }
+  }
+}
