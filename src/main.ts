@@ -286,7 +286,7 @@ export default class SlackSyncPlugin extends Plugin {
     } else {
       // 新しいファイルのヘッダーを作成（タグ付き）
       content = `# ${channelName} - ${today}\n\n`;
-      content += `Tags: #${channelName}/${today}\n\n`;
+      content += `Tags: #slack-sync/${channelName}/${today}\n\n`;
     }
     
     // メッセージを追加
@@ -299,7 +299,7 @@ export default class SlackSyncPlugin extends Plugin {
       await this.app.vault.create(filePath, content);
     }
     
-    console.log(`Saved to: ${filePath} with tag: #${channelName}/${today}`);
+    console.log(`Saved to: ${filePath} with tag: #slack-sync/${channelName}/${today}`);
   }
 
   // チャンネル同期処理

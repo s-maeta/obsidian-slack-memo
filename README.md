@@ -127,7 +127,7 @@ Slack Sync/              # メインフォルダ（設定で変更可能）
 ```markdown
 # general - 2024-01-15
 
-Tags: #general/2024-01-15
+Tags: #slack-sync/general/2024-01-15
 
 **John Doe** 09:30
 Hello everyone! How's the project going?
@@ -139,9 +139,10 @@ It's going well! We're on schedule.
 ## タグ管理
 
 各メッセージファイルには自動的にタグが付与されます：
-- フォーマット: `#チャンネル名/日付`
-- 例: `#general/2024-01-15`, `#obsidian/2024-01-16`
+- フォーマット: `#slack-sync/チャンネル名/日付`
+- 例: `#slack-sync/general/2024-01-15`, `#slack-sync/obsidian/2024-01-16`
 - Obsidianのタグ機能で素早く検索・整理が可能
+- `#slack-sync`で全てのSlackメッセージを一括検索
 
 ## 設定項目
 

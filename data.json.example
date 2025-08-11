@@ -43,7 +43,7 @@
       "folderPath": "{baseFolder}/{channel}",
       "fileNameFormat": "{date}",
       "pageHeaderFormat": "# {channel} - {date}",
-      "tagFormat": "#{channel}/{date}"
+      "tagFormat": "#slack-sync/{channel}/{date}"
     }
   }
 }
