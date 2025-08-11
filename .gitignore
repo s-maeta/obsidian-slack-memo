@@ -66,6 +66,10 @@ data.json
 .kiro/
 .serena/
 
+# Development and implementation folders
+implemention/
+implementation/
+
 # Development and testing files
 *.local
 *.private
