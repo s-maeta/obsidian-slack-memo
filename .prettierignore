@@ -1,0 +1,14 @@
+# Build outputs
+main.js
+*.js.map
+lib/
+dist/
+
+# Dependencies
+node_modules/
+
+# Coverage
+coverage/
+
+# Generated files
+*.d.ts
