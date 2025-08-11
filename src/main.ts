@@ -14,7 +14,11 @@ interface SlackSyncSettings {
   channelMappings: any[];
   dailyNoteSettings: any;
   messageFormat: any;
-  syncHistory: any;
+  syncHistory?: {
+    lastSyncTime: string | null;
+    totalMessagesSynced: number;
+    channelLastSync: Record<string, string>;
+  };
   storageSettings?: {
     baseFolder: string;
     organizationType: string;
@@ -32,7 +36,11 @@ const DEFAULT_SETTINGS: SlackSyncSettings = {
   channelMappings: [],
   dailyNoteSettings: {},
   messageFormat: {},
-  syncHistory: {},
+  syncHistory: {
+    lastSyncTime: null,
+    totalMessagesSynced: 0,
+    channelLastSync: {}
+  },
   storageSettings: {
     baseFolder: 'Slack Sync',
     organizationType: 'daily',
@@ -236,10 +244,16 @@ export default class SlackSyncPlugin extends Plugin {
         }
       }
 
-      // Update sync history (simplified)
-      console.log(`Sync completed at: ${new Date().toISOString()}`);
+      // Update global sync statistics
+      const completedAt = new Date().toISOString();
+      console.log(`Sync completed at: ${completedAt}`);
       
-      new Notice(`Slack同期が完了しました！ ${totalMessages} メッセージを処理しました。`);
+      // Display completion notice with sync statistics
+      const lastSyncInfo = this.settings.syncHistory?.lastSyncTime 
+        ? ` (前回同期: ${new Date(this.settings.syncHistory.lastSyncTime).toLocaleString()})`
+        : '';
+      
+      new Notice(`Slack同期が完了しました！ ${totalMessages} メッセージを処理しました${lastSyncInfo}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       new Notice(`同期エラー: ${errorMessage}`, 5000);
@@ -290,12 +304,32 @@ export default class SlackSyncPlugin extends Plugin {
   private async syncChannel(channelId: string, channelName: string): Promise<number> {
     console.log(`Starting sync for channel: ${channelName} (${channelId})`);
     
-    // テスト用: 過去7日間のメッセージを取得（より多くのメッセージを確実に取得するため）
-    const lastWeek = new Date();
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    const lastSyncTime = (lastWeek.getTime() / 1000).toString();
+    // 最終同期時刻を取得（チャンネル別または全体の最終同期時刻）
+    const channelLastSync = this.settings.syncHistory?.channelLastSync?.[channelId];
+    const globalLastSync = this.settings.syncHistory?.lastSyncTime;
     
-    console.log(`Fetching messages since: ${new Date(lastWeek).toISOString()} (timestamp: ${lastSyncTime})`);
+    let lastSyncTime: string;
+    let lastSyncDate: Date;
+    
+    if (channelLastSync) {
+      // チャンネル別の最終同期時刻がある場合
+      lastSyncDate = new Date(channelLastSync);
+      lastSyncTime = (lastSyncDate.getTime() / 1000).toString();
+      console.log(`Using channel-specific last sync: ${lastSyncDate.toISOString()}`);
+    } else if (globalLastSync) {
+      // グローバルの最終同期時刻がある場合
+      lastSyncDate = new Date(globalLastSync);
+      lastSyncTime = (lastSyncDate.getTime() / 1000).toString();
+      console.log(`Using global last sync: ${lastSyncDate.toISOString()}`);
+    } else {
+      // 初回同期の場合：過去24時間分を取得
+      lastSyncDate = new Date();
+      lastSyncDate.setHours(lastSyncDate.getHours() - 24);
+      lastSyncTime = (lastSyncDate.getTime() / 1000).toString();
+      console.log(`First sync for channel: fetching messages since ${lastSyncDate.toISOString()}`);
+    }
+    
+    console.log(`Fetching messages since: ${lastSyncDate.toISOString()} (timestamp: ${lastSyncTime})`);
     
     // Get channel history
     const historyOptions: any = {
@@ -318,7 +352,16 @@ export default class SlackSyncPlugin extends Plugin {
 
     // Process each message
     for (const message of messages) {
-      console.log(`Processing message: ${message.ts}, text: ${message.text?.substring(0, 50)}..., subtype: ${message.subtype}, user: ${message.user}`);
+      const messageTime = parseFloat(message.ts) * 1000; // Slackのタイムスタンプはsecond、JavaScriptはmillisecond
+      const messageDate = new Date(messageTime);
+      
+      console.log(`Processing message: ${message.ts}, time: ${messageDate.toISOString()}, text: ${message.text?.substring(0, 50)}..., subtype: ${message.subtype}, user: ${message.user}`);
+      
+      // 重複チェック: メッセージが最終同期時刻より古い場合はスキップ
+      if (messageTime <= lastSyncDate.getTime()) {
+        console.log(`Skipping message ${message.ts} - already synced (${messageDate.toISOString()} <= ${lastSyncDate.toISOString()})`);
+        continue;
+      }
       
       // テスト用: より多くのメッセージタイプを処理する
       if (message.text) { // subtypeの条件を一時的に削除してテスト
@@ -343,10 +386,34 @@ export default class SlackSyncPlugin extends Plugin {
       }
     }
 
-    // Update channel sync history (simplified)
-    if (processedCount > 0) {
-      console.log(`Channel ${channelName} sync completed: ${processedCount} messages`);
+    // Update channel sync history
+    const currentTime = new Date().toISOString();
+    
+    // 同期履歴の初期化（設定が存在しない場合）
+    if (!this.settings.syncHistory) {
+      this.settings.syncHistory = {
+        lastSyncTime: null,
+        totalMessagesSynced: 0,
+        channelLastSync: {}
+      };
     }
+    
+    // チャンネル別の最終同期時刻を更新
+    if (!this.settings.syncHistory.channelLastSync) {
+      this.settings.syncHistory.channelLastSync = {};
+    }
+    this.settings.syncHistory.channelLastSync[channelId] = currentTime;
+    
+    // グローバルの最終同期時刻を更新
+    this.settings.syncHistory.lastSyncTime = currentTime;
+    
+    // 同期されたメッセージ数を累計
+    this.settings.syncHistory.totalMessagesSynced += processedCount;
+    
+    // 設定を保存
+    await this.saveSettings();
+    
+    console.log(`Channel ${channelName} sync completed: ${processedCount} messages (Last sync: ${currentTime})`);
 
     return processedCount;
   }
