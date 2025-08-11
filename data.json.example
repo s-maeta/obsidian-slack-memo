@@ -29,7 +29,7 @@
     "channelLastSync": {}
   },
   "storageSettings": {
-    "baseFolder": "Slack Sync",
+    "baseFolder": "My Slack Messages",
     "organizationType": "channel-daily",
     "dailyPageSettings": {
       "enabled": false,

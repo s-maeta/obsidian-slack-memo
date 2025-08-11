@@ -797,6 +797,35 @@ class SlackSyncSettingTab extends PluginSettingTab {
           })
       );
 
+    // ベースフォルダ設定
+    new Setting(containerEl)
+      .setName('保存先フォルダ')
+      .setDesc('Slackメッセージの保存先フォルダ名を設定してください')
+      .addText(text => {
+        const currentBaseFolder = this.plugin.settings.storageSettings?.baseFolder || 'Slack Sync';
+        text
+          .setPlaceholder('例: Slack Sync, My Slack Messages')
+          .setValue(currentBaseFolder)
+          .onChange(async value => {
+            // 設定の初期化（必要な場合）
+            if (!this.plugin.settings.storageSettings) {
+              this.plugin.settings.storageSettings = {
+                baseFolder: 'Slack Sync',
+                organizationType: 'channel-daily',
+                dailyPageSettings: {},
+                channelPageSettings: {}
+              };
+            }
+            
+            // 空文字列の場合はデフォルト値を使用
+            const folderName = value.trim() || 'Slack Sync';
+            this.plugin.settings.storageSettings.baseFolder = folderName;
+            
+            await this.plugin.saveSettings();
+            new Notice(`保存先フォルダを「${folderName}」に変更しました`, 2000);
+          });
+      });
+
     // 同期間隔設定
     new Setting(containerEl)
       .setName('自動同期間隔')
