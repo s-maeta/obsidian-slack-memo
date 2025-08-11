@@ -30,22 +30,23 @@ export class SlackAuthManager {
   private readonly CLIENT_SECRET: string;
   private readonly REDIRECT_URI = 'obsidian://slack-sync/auth/callback';
   private readonly SCOPES = [
-    'channels:read',      // パブリックチャンネル一覧の取得
-    'channels:history',   // パブリックチャンネルの履歴取得
-    'groups:read',        // プライベートチャンネル一覧の取得  
-    'groups:history',     // プライベートチャンネルの履歴取得
-    'im:read',           // DM一覧の取得
-    'im:history',        // DMの履歴取得
-    'mpim:read',         // グループDM一覧の取得
-    'mpim:history',      // グループDMの履歴取得
-    'users:read',        // ユーザー情報の取得
-    'team:read'          // チーム情報の取得
+    'channels:read', // パブリックチャンネル一覧の取得
+    'channels:history', // パブリックチャンネルの履歴取得
+    'groups:read', // プライベートチャンネル一覧の取得
+    'groups:history', // プライベートチャンネルの履歴取得
+    'im:read', // DM一覧の取得
+    'im:history', // DMの履歴取得
+    'mpim:read', // グループDM一覧の取得
+    'mpim:history', // グループDMの履歴取得
+    'users:read', // ユーザー情報の取得
+    'team:read', // チーム情報の取得
   ];
 
   constructor(plugin: any, clientId?: string, clientSecret?: string) {
     this.plugin = plugin;
     this.CLIENT_ID = clientId || process.env.SLACK_CLIENT_ID || 'your-slack-client-id';
-    this.CLIENT_SECRET = clientSecret || process.env.SLACK_CLIENT_SECRET || 'your-slack-client-secret';
+    this.CLIENT_SECRET =
+      clientSecret || process.env.SLACK_CLIENT_SECRET || 'your-slack-client-secret';
   }
 
   generateAuthUrl(): string {
@@ -98,7 +99,11 @@ export class SlackAuthManager {
         team: tokenResponse.team,
       };
     } catch (error) {
-      if (error.message.includes('Network') || error.message.includes('fetch') || error.message.includes('ENOTFOUND')) {
+      if (
+        error.message.includes('Network') ||
+        error.message.includes('fetch') ||
+        error.message.includes('ENOTFOUND')
+      ) {
         return {
           success: false,
           error: 'ネットワークエラーが発生しました。インターネット接続を確認してください。',
@@ -135,15 +140,15 @@ export class SlackAuthManager {
   async validateToken(token: string): Promise<Result<any>> {
     try {
       console.log('SlackAuthManager: Validating token...');
-      
+
       // Obsidian環境では `requestUrl` を使用する
       const { requestUrl } = require('obsidian');
-      
+
       const response = await requestUrl({
         url: 'https://slack.com/api/auth.test',
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       });
@@ -158,7 +163,10 @@ export class SlackAuthManager {
       }
     } catch (error) {
       console.error('SlackAuthManager: Validation error:', error);
-      return { success: false, error: error instanceof Error ? error : new Error('Unknown validation error') };
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error('Unknown validation error'),
+      };
     }
   }
 
@@ -191,7 +199,7 @@ export class SlackAuthManager {
 
     // Obsidian環境では `requestUrl` を使用する
     const { requestUrl } = require('obsidian');
-    
+
     const response = await requestUrl({
       url: 'https://slack.com/api/oauth.v2.access',
       method: 'POST',

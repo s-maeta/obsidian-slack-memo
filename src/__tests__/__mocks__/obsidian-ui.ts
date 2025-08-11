@@ -44,7 +44,7 @@ export class MockHTMLElement {
       const testId = selector.match(/data-testid="([^"]*)"/)![1];
       return this.findByTestId(testId);
     }
-    
+
     // クラス名での検索をサポート
     if (selector.startsWith('.')) {
       const className = selector.substring(1);
@@ -57,7 +57,7 @@ export class MockHTMLElement {
 
   querySelectorAll(selector: string): MockHTMLElement[] {
     const results: MockHTMLElement[] = [];
-    
+
     if (selector.startsWith('[data-testid^="') && selector.includes('"]')) {
       const testIdPrefix = selector.match(/data-testid\^="([^"]*)"/)![1];
       this.collectByTestIdPrefix(testIdPrefix, results);
@@ -70,12 +70,12 @@ export class MockHTMLElement {
     if (this.attributes.get('data-testid') === testId) {
       return this;
     }
-    
+
     for (const child of this.children) {
       const result = child.findByTestId(testId);
       if (result) return result;
     }
-    
+
     return null;
   }
 
@@ -83,12 +83,12 @@ export class MockHTMLElement {
     if (this.classes.has(className)) {
       return this;
     }
-    
+
     for (const child of this.children) {
       const result = child.findByClassName(className);
       if (result) return result;
     }
-    
+
     return null;
   }
 
@@ -97,7 +97,7 @@ export class MockHTMLElement {
     if (testId && testId.startsWith(prefix)) {
       results.push(this);
     }
-    
+
     this.children.forEach(child => {
       child.collectByTestIdPrefix(prefix, results);
     });
@@ -106,7 +106,7 @@ export class MockHTMLElement {
   // 属性管理
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
-    
+
     if (name === 'data-testid') {
       // テスト用の属性処理
     }
@@ -143,7 +143,7 @@ export class MockHTMLElement {
           this.classes.add(className);
         }
         this.className = Array.from(this.classes).join(' ');
-      }
+      },
     };
   }
 

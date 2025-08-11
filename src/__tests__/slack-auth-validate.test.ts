@@ -11,13 +11,13 @@ describe('SlackAuthManager - validateToken', () => {
   beforeEach(() => {
     // Reset fetch mock
     (global.fetch as jest.Mock).mockReset();
-    
+
     // Create mock plugin
     mockPlugin = {
       settings: {
-        slackToken: 'test-token'
+        slackToken: 'test-token',
       },
-      saveSettings: jest.fn()
+      saveSettings: jest.fn(),
     };
 
     authManager = new SlackAuthManager(mockPlugin);
@@ -34,12 +34,12 @@ describe('SlackAuthManager - validateToken', () => {
         ok: true,
         team: 'Test Team',
         user: 'test_user',
-        team_id: 'T12345'
+        team_id: 'T12345',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -53,7 +53,7 @@ describe('SlackAuthManager - validateToken', () => {
       expect(fetch).toHaveBeenCalledWith('https://slack.com/api/auth.test', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer xoxb-valid-token',
+          Authorization: 'Bearer xoxb-valid-token',
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       });
@@ -65,12 +65,12 @@ describe('SlackAuthManager - validateToken', () => {
         ok: true,
         team: 'Test Team',
         user: 'test_user',
-        team_id: 'T12345'
+        team_id: 'T12345',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -89,12 +89,12 @@ describe('SlackAuthManager - validateToken', () => {
       // Arrange
       const mockResponse = {
         ok: false,
-        error: 'invalid_auth'
+        error: 'invalid_auth',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -111,12 +111,12 @@ describe('SlackAuthManager - validateToken', () => {
       // Arrange
       const mockResponse = {
         ok: false,
-        error: 'token_revoked'
+        error: 'token_revoked',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -135,8 +135,8 @@ describe('SlackAuthManager - validateToken', () => {
         status: 401,
         json: jest.fn().mockResolvedValueOnce({
           ok: false,
-          error: 'invalid_auth'
-        })
+          error: 'invalid_auth',
+        }),
       });
 
       // Act
@@ -180,13 +180,13 @@ describe('SlackAuthManager - validateToken', () => {
     it('should provide default error message for undefined error', async () => {
       // Arrange
       const mockResponse = {
-        ok: false
+        ok: false,
         // error field is undefined
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -213,19 +213,19 @@ describe('SlackAuthManager - validateToken', () => {
         const mockResponse = {
           ok: true,
           team: 'Test Team',
-          user: 'test_user'
+          user: 'test_user',
         };
 
         (global.fetch as jest.Mock).mockResolvedValueOnce({
           status: 200,
-          json: jest.fn().mockResolvedValueOnce(mockResponse)
+          json: jest.fn().mockResolvedValueOnce(mockResponse),
         });
 
         // Act
-        const testToken = format.includes('xoxe') 
+        const testToken = format.includes('xoxe')
           ? 'xoxe.xoxp-1-test-token-here'
           : `${format}1234567890-test-token-here`;
-        
+
         const result = await authManager.validateToken(testToken);
 
         // Assert
@@ -233,7 +233,7 @@ describe('SlackAuthManager - validateToken', () => {
         expect(fetch).toHaveBeenCalledWith('https://slack.com/api/auth.test', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${testToken}`,
+            Authorization: `Bearer ${testToken}`,
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         });
@@ -246,12 +246,12 @@ describe('SlackAuthManager - validateToken', () => {
       // Arrange
       const mockResponse = {
         ok: false,
-        error: 'ratelimited'
+        error: 'ratelimited',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 429,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -270,12 +270,12 @@ describe('SlackAuthManager - validateToken', () => {
         ok: false,
         error: 'missing_scope',
         needed: 'channels:read',
-        provided: 'identify'
+        provided: 'identify',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -304,7 +304,7 @@ describe('SlackAuthManager - validateToken', () => {
       // Arrange
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce({ ok: true })
+        json: jest.fn().mockResolvedValueOnce({ ok: true }),
       });
 
       // Act
@@ -319,7 +319,7 @@ describe('SlackAuthManager - validateToken', () => {
       const mockResponse = { ok: true, team: 'Test' };
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         status: 200,
-        json: jest.fn().mockResolvedValueOnce(mockResponse)
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
       });
 
       // Act
@@ -327,7 +327,10 @@ describe('SlackAuthManager - validateToken', () => {
 
       // Assert
       expect(consoleSpy).toHaveBeenCalledWith('SlackAuthManager: Validation response status:', 200);
-      expect(consoleSpy).toHaveBeenCalledWith('SlackAuthManager: Validation response data:', mockResponse);
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'SlackAuthManager: Validation response data:',
+        mockResponse
+      );
     });
   });
 });

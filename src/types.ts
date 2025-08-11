@@ -1,9 +1,7 @@
 // 共通の型定義
 
 // 結果型（成功/失敗を表現）
-export type Result<T, E = Error> = 
-  | { success: true; value: T }
-  | { success: false; error: E };
+export type Result<T, E = Error> = { success: true; value: T } | { success: false; error: E };
 
 // Type guard for Result type
 export function isSuccess<T, E>(result: Result<T, E>): result is { success: true; value: T } {
@@ -42,7 +40,7 @@ export interface DailyPageSettings {
   sectionHeaderFormat: string; // チャンネルセクションのヘッダー形式
 }
 
-// チャンネル別ページ設定  
+// チャンネル別ページ設定
 export interface ChannelPageSettings {
   enabled: boolean;
   folderPath: string; // チャンネル別フォルダのパス（例: "{baseFolder}/Channels/{channel}"）
@@ -120,13 +118,13 @@ export const DEFAULT_SETTINGS: PluginSettings = {
       folderPath: '{baseFolder}/Daily',
       fileNameFormat: '{date}',
       pageHeaderFormat: '# {date} - Slack Messages',
-      sectionHeaderFormat: '## #{channel}'
+      sectionHeaderFormat: '## #{channel}',
     },
     channelPageSettings: {
       enabled: false,
       folderPath: '{baseFolder}/Channels/{channel}',
       fileNameFormat: '{date}',
-      pageHeaderFormat: '# #{channel} - {date}'
-    }
+      pageHeaderFormat: '# #{channel} - {date}',
+    },
   },
 };

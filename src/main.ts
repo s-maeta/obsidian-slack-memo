@@ -39,14 +39,14 @@ const DEFAULT_SETTINGS: SlackSyncSettings = {
   syncHistory: {
     lastSyncTime: null,
     totalMessagesSynced: 0,
-    channelLastSync: {}
+    channelLastSync: {},
   },
   storageSettings: {
     baseFolder: 'Slack Sync',
     organizationType: 'daily',
     dailyPageSettings: {},
-    channelPageSettings: {}
-  }
+    channelPageSettings: {},
+  },
 };
 
 export default class SlackSyncPlugin extends Plugin {
@@ -58,7 +58,7 @@ export default class SlackSyncPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    
+
     // Initialize core components
     await this.initializeComponents();
 
@@ -194,7 +194,7 @@ export default class SlackSyncPlugin extends Plugin {
       // Get channels list
       const channelsResult = await this.apiClient.listChannels({
         types: 'public_channel,private_channel',
-        exclude_archived: true
+        exclude_archived: true,
       });
 
       if (isError(channelsResult)) {
@@ -202,14 +202,19 @@ export default class SlackSyncPlugin extends Plugin {
       }
 
       const channels = channelsResult.value;
-      console.log(`Found ${channels.length} channels:`, channels.map(c => ({ name: c.name, id: c.id, is_member: c.is_member })));
-      
+      console.log(
+        `Found ${channels.length} channels:`,
+        channels.map(c => ({ name: c.name, id: c.id, is_member: c.is_member }))
+      );
+
       let totalMessages = 0;
 
       // Process each channel
       for (const channel of channels) {
-        console.log(`Processing channel: ${channel.name} (${channel.id}), is_member: ${channel.is_member}`);
-        
+        console.log(
+          `Processing channel: ${channel.name} (${channel.id}), is_member: ${channel.is_member}`
+        );
+
         // メンバーでない場合は参加を試みる
         if (!channel.is_member) {
           console.log(`Attempting to join channel ${channel.name}...`);
@@ -227,7 +232,7 @@ export default class SlackSyncPlugin extends Plugin {
             continue;
           }
         }
-        
+
         // チャンネル同期を実行
         try {
           const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
@@ -241,12 +246,12 @@ export default class SlackSyncPlugin extends Plugin {
       // Update global sync statistics
       const completedAt = new Date().toISOString();
       console.log(`Sync completed at: ${completedAt}`);
-      
+
       // Display completion notice with sync statistics
-      const lastSyncInfo = this.settings.syncHistory?.lastSyncTime 
+      const lastSyncInfo = this.settings.syncHistory?.lastSyncTime
         ? ` (前回同期: ${new Date(this.settings.syncHistory.lastSyncTime).toLocaleString()})`
         : '';
-      
+
       new Notice(`同期完了: ${totalMessages}件のメッセージを処理しました`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -259,22 +264,22 @@ export default class SlackSyncPlugin extends Plugin {
   private async saveMessageToFile(channelName: string, messageContent: string): Promise<void> {
     const baseFolder = this.settings.storageSettings?.baseFolder || 'Slack Sync';
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    
+
     // 新しいフォルダ構成: {baseFolder}/{channelName}/{date}.md
     const channelFolder = `${baseFolder}/${channelName}`;
     const filePath = `${channelFolder}/${today}.md`;
-    
+
     // チャンネルフォルダを作成（存在しない場合）
     const folder = this.app.vault.getAbstractFileByPath(channelFolder);
     if (!folder) {
       console.log(`Creating channel folder: ${channelFolder}`);
       await this.app.vault.createFolder(channelFolder);
     }
-    
+
     // ファイルが存在するかチェック
     const file = this.app.vault.getAbstractFileByPath(filePath);
     let content = '';
-    
+
     if (file && file instanceof TFile) {
       content = await this.app.vault.read(file);
     } else {
@@ -282,31 +287,31 @@ export default class SlackSyncPlugin extends Plugin {
       content = `# ${channelName} - ${today}\n\n`;
       content += `Tags: #slack-sync/${channelName}/${today}\n\n`;
     }
-    
+
     // メッセージを追加
     content += `${messageContent}\n\n`;
-    
+
     // ファイルを作成または更新
     if (file && file instanceof TFile) {
       await this.app.vault.modify(file, content);
     } else {
       await this.app.vault.create(filePath, content);
     }
-    
+
     console.log(`Saved to: ${filePath} with tag: #slack-sync/${channelName}/${today}`);
   }
 
   // チャンネル同期処理
   private async syncChannel(channelId: string, channelName: string): Promise<number> {
     console.log(`Starting sync for channel: ${channelName} (${channelId})`);
-    
+
     // 最終同期時刻を取得（チャンネル別または全体の最終同期時刻）
     const channelLastSync = this.settings.syncHistory?.channelLastSync?.[channelId];
     const globalLastSync = this.settings.syncHistory?.lastSyncTime;
-    
+
     let lastSyncTime: string;
     let lastSyncDate: Date;
-    
+
     if (channelLastSync) {
       // チャンネル別の最終同期時刻がある場合
       lastSyncDate = new Date(channelLastSync);
@@ -324,54 +329,74 @@ export default class SlackSyncPlugin extends Plugin {
       lastSyncTime = (lastSyncDate.getTime() / 1000).toString();
       console.log(`First sync for channel: fetching messages since ${lastSyncDate.toISOString()}`);
     }
-    
-    console.log(`Fetching messages since: ${lastSyncDate.toISOString()} (timestamp: ${lastSyncTime})`);
-    
+
+    console.log(
+      `Fetching messages since: ${lastSyncDate.toISOString()} (timestamp: ${lastSyncTime})`
+    );
+
     // Get channel history
     const historyOptions: any = {
-      limit: 100
+      limit: 100,
     };
-    
+
     // Get messages after last sync time
     historyOptions.oldest = lastSyncTime;
 
     const historyResult = await this.apiClient.getChannelHistory(channelId, historyOptions);
-    
+
     if (isError(historyResult)) {
       throw historyResult.error;
     }
 
     const messages = historyResult.value;
     console.log(`Found ${messages.length} messages in channel ${channelName}`);
-    
+
     let processedCount = 0;
 
     // Process each message
     for (const message of messages) {
       const messageTime = parseFloat(message.ts) * 1000; // Slackのタイムスタンプはsecond、JavaScriptはmillisecond
       const messageDate = new Date(messageTime);
-      
-      console.log(`Processing message: ${message.ts}, time: ${messageDate.toISOString()}, text: ${message.text?.substring(0, 50)}..., subtype: ${message.subtype}, user: ${message.user}`);
-      
+
+      console.log(
+        `Processing message: ${
+          message.ts
+        }, time: ${messageDate.toISOString()}, text: ${message.text?.substring(
+          0,
+          50
+        )}..., subtype: ${message.subtype}, user: ${message.user}`
+      );
+
       // 重複チェック: メッセージが最終同期時刻より古い場合はスキップ
       if (messageTime <= lastSyncDate.getTime()) {
-        console.log(`Skipping message ${message.ts} - already synced (${messageDate.toISOString()} <= ${lastSyncDate.toISOString()})`);
+        console.log(
+          `Skipping message ${
+            message.ts
+          } - already synced (${messageDate.toISOString()} <= ${lastSyncDate.toISOString()})`
+        );
         continue;
       }
-      
+
       // テスト用: より多くのメッセージタイプを処理する
-      if (message.text) { // subtypeの条件を一時的に削除してテスト
+      if (message.text) {
+        // subtypeの条件を一時的に削除してテスト
         try {
           // Convert message to markdown
           const conversionResult = await this.markdownConverter.convertMessage(message, channelId);
-          
+
           // Format the message content
-          const messageContent = await this.formatMessageContent(message, channelName, conversionResult.markdown);
-          
+          const messageContent = await this.formatMessageContent(
+            message,
+            channelName,
+            conversionResult.markdown
+          );
+
           // Save the message - テスト用に実際にファイルに保存
           try {
             await this.saveMessageToFile(channelName, messageContent);
-            console.log(`✓ Saved message from ${channelName}: ${messageContent.substring(0, 100)}...`);
+            console.log(
+              `✓ Saved message from ${channelName}: ${messageContent.substring(0, 100)}...`
+            );
             processedCount++;
           } catch (saveError) {
             console.error(`Failed to save message to file:`, saveError);
@@ -384,46 +409,55 @@ export default class SlackSyncPlugin extends Plugin {
 
     // Update channel sync history
     const currentTime = new Date().toISOString();
-    
+
     // 同期履歴の初期化（設定が存在しない場合）
     if (!this.settings.syncHistory) {
       this.settings.syncHistory = {
         lastSyncTime: null,
         totalMessagesSynced: 0,
-        channelLastSync: {}
+        channelLastSync: {},
       };
     }
-    
+
     // チャンネル別の最終同期時刻を更新
     if (!this.settings.syncHistory.channelLastSync) {
       this.settings.syncHistory.channelLastSync = {};
     }
     this.settings.syncHistory.channelLastSync[channelId] = currentTime;
-    
+
     // グローバルの最終同期時刻を更新
     this.settings.syncHistory.lastSyncTime = currentTime;
-    
+
     // 同期されたメッセージ数を累計
     this.settings.syncHistory.totalMessagesSynced += processedCount;
-    
+
     // 設定を保存
     await this.saveSettings();
-    
-    console.log(`Channel ${channelName} sync completed: ${processedCount} messages (Last sync: ${currentTime})`);
+
+    console.log(
+      `Channel ${channelName} sync completed: ${processedCount} messages (Last sync: ${currentTime})`
+    );
 
     return processedCount;
   }
 
   // Format message content for display
-  private async formatMessageContent(message: any, channelName: string, markdownText: string): Promise<string> {
+  private async formatMessageContent(
+    message: any,
+    channelName: string,
+    markdownText: string
+  ): Promise<string> {
     const timestamp = new Date(parseFloat(message.ts) * 1000);
-    const timeString = timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    const timeString = timestamp.toLocaleTimeString('ja-JP', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     const userName = message.user ? `@${message.user}` : '';
-    
+
     // Build the formatted content
     const metadata = [timeString, userName].filter(Boolean).join(' ');
     const content = `**${metadata}**\n\n${markdownText}`;
-    
+
     return content;
   }
 
@@ -450,33 +484,41 @@ export default class SlackSyncPlugin extends Plugin {
       // Find channel by name
       const channelsResult = await this.apiClient.listChannels({
         types: 'public_channel,private_channel',
-        exclude_archived: true
+        exclude_archived: true,
       });
 
       if (isError(channelsResult)) {
         throw channelsResult.error;
       }
 
-      const channel = channelsResult.value.find(ch => 
-        ch.name === channelName.replace('#', '') || ch.id === channelName
+      const channel = channelsResult.value.find(
+        ch => ch.name === channelName.replace('#', '') || ch.id === channelName
       );
 
       if (!channel) {
-        new Notice(`エラー: チャンネル "${channelName}" が見つかりませんでした。チャンネル名を確認してください。`, 3000);
+        new Notice(
+          `エラー: チャンネル "${channelName}" が見つかりませんでした。チャンネル名を確認してください。`,
+          3000
+        );
         return;
       }
 
       if (!channel.is_member) {
-        new Notice(`エラー: チャンネル "${channelName}" のメンバーではありません。チャンネルに参加してから再試行してください。`, 3000);
+        new Notice(
+          `エラー: チャンネル "${channelName}" のメンバーではありません。チャンネルに参加してから再試行してください。`,
+          3000
+        );
         return;
       }
 
       const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
       new Notice(`同期完了: ${messageCount}件のメッセージを処理しました`);
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      new Notice(`チャンネル同期エラー: ${errorMessage}。詳細はコンソールログを確認してください。`, 5000);
+      new Notice(
+        `チャンネル同期エラー: ${errorMessage}。詳細はコンソールログを確認してください。`,
+        5000
+      );
       console.error('Channel sync error:', error);
     }
   }
@@ -527,14 +569,19 @@ export default class SlackSyncPlugin extends Plugin {
     this.stopAutoSync(); // 既存のタイマーをクリア
 
     const intervalMs = this.settings.syncInterval; // ミリ秒
-    
+
     this.autoSyncInterval = setInterval(async () => {
       try {
         console.log('Auto sync started');
         await this.performBackgroundSync();
       } catch (error) {
         console.error('Auto sync error:', error);
-        new Notice(`自動同期エラー: ${error instanceof Error ? error.message : 'Unknown error'}。ログを確認してください。`, 3000);
+        new Notice(
+          `自動同期エラー: ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }。ログを確認してください。`,
+          3000
+        );
       }
     }, intervalMs);
   }
@@ -557,7 +604,7 @@ export default class SlackSyncPlugin extends Plugin {
       // Get channels list
       const channelsResult = await this.apiClient.listChannels({
         types: 'public_channel,private_channel',
-        exclude_archived: true
+        exclude_archived: true,
       });
 
       if (isError(channelsResult)) {
@@ -569,7 +616,7 @@ export default class SlackSyncPlugin extends Plugin {
 
       // Process each channel (limit to reduce load)
       const memberChannels = channels.filter(ch => ch.is_member).slice(0, 10); // 最大10チャンネル
-      
+
       for (const channel of memberChannels) {
         try {
           const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
@@ -581,12 +628,12 @@ export default class SlackSyncPlugin extends Plugin {
 
       // Update sync history (simplified)
       console.log(`Sync completed at: ${new Date().toISOString()}`);
-      
+
       // Only show notification if messages were found
       if (totalMessages > 0) {
         new Notice(`自動同期完了: ${totalMessages}件の新着メッセージ`);
       }
-      
+
       console.log(`Background sync completed: ${totalMessages} messages processed`);
     } catch (error) {
       console.error('Background sync error:', error);
@@ -743,7 +790,6 @@ class SlackSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl('h2', { text: 'Slack同期設定' });
 
-
     // Slackトークン設定
     new Setting(containerEl)
       .setName('Slackトークン')
@@ -797,14 +843,14 @@ class SlackSyncSettingTab extends PluginSettingTab {
                 baseFolder: 'Slack Sync',
                 organizationType: 'channel-daily',
                 dailyPageSettings: {},
-                channelPageSettings: {}
+                channelPageSettings: {},
               };
             }
-            
+
             // 空文字列の場合はデフォルト値を使用
             const folderName = value.trim() || 'Slack Sync';
             this.plugin.settings.storageSettings.baseFolder = folderName;
-            
+
             await this.plugin.saveSettings();
           });
       });
@@ -853,7 +899,5 @@ class SlackSyncSettingTab extends PluginSettingTab {
           console.log('Auto sync setting changed:', value);
         })
       );
-
   }
-
 }

@@ -9,9 +9,9 @@ describe('SlackAuthManager - Integration Tests', () => {
     // Create mock plugin
     mockPlugin = {
       settings: {
-        slackToken: process.env.SLACK_TOKEN || 'test-token'
+        slackToken: process.env.SLACK_TOKEN || 'test-token',
       },
-      saveSettings: jest.fn()
+      saveSettings: jest.fn(),
     };
 
     authManager = new SlackAuthManager(mockPlugin);
@@ -22,12 +22,12 @@ describe('SlackAuthManager - Integration Tests', () => {
       const testTokens = [
         'xoxe.xoxp-1-FAKE-TOKEN-FOR-TESTING-PURPOSES-ONLY',
         'xoxb-FAKE-BOT-TOKEN-FOR-TESTING',
-        'xoxp-FAKE-USER-TOKEN-FOR-TESTING'
+        'xoxp-FAKE-USER-TOKEN-FOR-TESTING',
       ];
 
       for (const token of testTokens) {
         console.log(`Testing token format: ${token.substring(0, 20)}...`);
-        
+
         // Note: This will make real API calls if a token is provided
         // In CI/CD, these should be skipped or use environment variables
         if (token.includes('test-token')) {
@@ -36,20 +36,22 @@ describe('SlackAuthManager - Integration Tests', () => {
         }
 
         const result = await authManager.validateToken(token);
-        
+
         // The result could be success or failure depending on the token validity
         // We're mainly testing that the format is accepted and no crashes occur
         expect(result).toBeDefined();
         expect(typeof result.success).toBe('boolean');
-        
+
         if (isError(result)) {
           console.log(`Token validation failed: ${result.error.message}`);
           // Common expected errors for test tokens:
-          expect(['invalid_auth', 'token_revoked', 'account_inactive'].some(
-            expectedError => result.error.message.includes(expectedError)
-          )).toBe(true);
+          expect(
+            ['invalid_auth', 'token_revoked', 'account_inactive'].some(expectedError =>
+              result.error.message.includes(expectedError)
+            )
+          ).toBe(true);
         }
-        
+
         if (isSuccess(result)) {
           console.log(`Token validation succeeded:`, result.value);
           expect(result.value).toHaveProperty('ok', true);
@@ -60,14 +62,14 @@ describe('SlackAuthManager - Integration Tests', () => {
     // Skip this test in CI by default
     it.skip('should work with real Slack token from environment', async () => {
       const realToken = process.env.SLACK_REAL_TOKEN;
-      
+
       if (!realToken) {
         console.log('Skipping real token test - no SLACK_REAL_TOKEN environment variable');
         return;
       }
 
       const result = await authManager.validateToken(realToken);
-      
+
       if (isSuccess(result)) {
         expect(result.value).toHaveProperty('ok', true);
         expect(result.value).toHaveProperty('team');
@@ -85,16 +87,16 @@ describe('SlackAuthManager - Integration Tests', () => {
       const testCases = [
         {
           token: '',
-          expectedError: /empty|invalid/i
+          expectedError: /empty|invalid/i,
         },
         {
           token: 'invalid-format',
-          expectedError: /format|invalid/i
+          expectedError: /format|invalid/i,
         },
         {
           token: 'xoxb-invalid-token',
-          expectedError: /invalid_auth|token_revoked/i
-        }
+          expectedError: /invalid_auth|token_revoked/i,
+        },
       ];
 
       for (const testCase of testCases) {
@@ -105,7 +107,7 @@ describe('SlackAuthManager - Integration Tests', () => {
         }
 
         const result = await authManager.validateToken(testCase.token);
-        
+
         expect(isError(result)).toBe(true);
         if (isError(result)) {
           expect(result.error.message).toMatch(testCase.expectedError);
@@ -120,7 +122,7 @@ describe('SlackAuthManager - Integration Tests', () => {
       mockPlugin.settings.slackToken = testToken;
 
       const result = await authManager.getDecryptedToken();
-      
+
       expect(result).toBe(testToken);
     });
 
@@ -128,7 +130,7 @@ describe('SlackAuthManager - Integration Tests', () => {
       mockPlugin.settings.slackToken = '';
 
       const result = await authManager.getDecryptedToken();
-      
+
       expect(result).toBeNull();
     });
   });

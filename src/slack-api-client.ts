@@ -104,7 +104,10 @@ export class SlackAPIClient {
           params.cursor = cursor;
         }
 
-        const response = await this.makeRequest<ConversationsHistoryResponse>('conversations.history', params);
+        const response = await this.makeRequest<ConversationsHistoryResponse>(
+          'conversations.history',
+          params
+        );
 
         if (!response.success) {
           return response as Result<Message[]>;
@@ -115,9 +118,9 @@ export class SlackAPIClient {
           ok: data.ok,
           messagesCount: data.messages?.length,
           has_more: data.has_more,
-          response_metadata: data.response_metadata
+          response_metadata: data.response_metadata,
         });
-        
+
         if (!data.ok) {
           return {
             success: false,
@@ -126,12 +129,15 @@ export class SlackAPIClient {
         }
 
         if (data.messages && data.messages.length > 0) {
-          console.log(`SlackAPIClient: Sample messages:`, data.messages.slice(0, 3).map(m => ({
-            ts: m.ts,
-            user: m.user,
-            text: m.text?.substring(0, 100),
-            subtype: m.subtype
-          })));
+          console.log(
+            `SlackAPIClient: Sample messages:`,
+            data.messages.slice(0, 3).map(m => ({
+              ts: m.ts,
+              user: m.user,
+              text: m.text?.substring(0, 100),
+              subtype: m.subtype,
+            }))
+          );
         }
 
         messages.push(...data.messages);
@@ -190,7 +196,10 @@ export class SlackAPIClient {
         ts: threadTs,
       };
 
-      const response = await this.makeRequest<ConversationsRepliesResponse>('conversations.replies', params);
+      const response = await this.makeRequest<ConversationsRepliesResponse>(
+        'conversations.replies',
+        params
+      );
 
       if (!response.success) {
         return response as Result<Message[]>;
@@ -228,23 +237,27 @@ export class SlackAPIClient {
           error: new Error('認証トークンが設定されていません'),
         };
       }
-      
+
       // トークンの形式をチェック（xoxe.xoxp- 形式にも対応）
       const validTokenFormats = [
         token.startsWith('xoxb-'),
         token.startsWith('xoxp-'),
         token.startsWith('xoxe-'),
-        token.startsWith('xoxe.xoxp-')
+        token.startsWith('xoxe.xoxp-'),
       ];
-      
+
       if (!validTokenFormats.some(valid => valid)) {
-        console.error('SlackAPIClient: Invalid token format. Token should start with xoxb-, xoxp-, xoxe-, or xoxe.xoxp-');
+        console.error(
+          'SlackAPIClient: Invalid token format. Token should start with xoxb-, xoxp-, xoxe-, or xoxe.xoxp-'
+        );
         return {
           success: false,
-          error: new Error('無効なトークン形式です。Slackトークンは xoxb-, xoxp-, xoxe-, または xoxe.xoxp- で始まる必要があります。'),
+          error: new Error(
+            '無効なトークン形式です。Slackトークンは xoxb-, xoxp-, xoxe-, または xoxe.xoxp- で始まる必要があります。'
+          ),
         };
       }
-      
+
       console.log('SlackAPIClient: Token format valid, starting request');
 
       let retries = 0;
@@ -261,15 +274,15 @@ export class SlackAPIClient {
 
           try {
             console.log('SlackAPIClient: Sending request to:', url.toString());
-            
+
             // Obsidian環境では `requestUrl` を使用する
             const { requestUrl } = require('obsidian');
-            
+
             const response = await requestUrl({
               url: url.toString(),
               method: 'GET',
               headers: {
-                'Authorization': `Bearer ${token}`,
+                Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json',
               },
             });
@@ -279,7 +292,7 @@ export class SlackAPIClient {
             // エラーレスポンスをチェック
             if (response.status < 200 || response.status >= 300) {
               console.error('SlackAPIClient: HTTP error response:', response.status, response.text);
-              
+
               // レート制限チェック
               if (response.status === 429) {
                 if (retries >= this.maxRetries) {
@@ -295,7 +308,7 @@ export class SlackAPIClient {
                 retries++;
                 continue;
               }
-              
+
               return {
                 success: false,
                 error: new Error(`HTTP ${response.status}: ${response.text}`),
@@ -311,18 +324,22 @@ export class SlackAPIClient {
         } catch (error) {
           lastError = error instanceof Error ? error : new Error('Unknown error');
           console.error('SlackAPIClient: Request error:', error);
-          
-          if (error.message.includes('Network') || error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+
+          if (
+            error.message.includes('Network') ||
+            error.message.includes('fetch') ||
+            error.message.includes('Failed to fetch')
+          ) {
             return {
               success: false,
               error: new Error(`ネットワークエラーが発生しました: ${error.message}`),
             };
           }
-          
+
           if (retries >= this.maxRetries) {
             break;
           }
-          
+
           console.log(`SlackAPIClient: Retrying request (${retries + 1}/${this.maxRetries})`);
           retries++;
           await new Promise(resolve => setTimeout(resolve, 1000 * retries)); // 指数バックオフ
@@ -366,12 +383,12 @@ export class SlackAPIClient {
 
       // Obsidian環境では `requestUrl` を使用する
       const { requestUrl } = require('obsidian');
-      
+
       const response = await requestUrl({
         url: `${this.baseUrl}/${endpoint}`,
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: formData.toString(),
@@ -380,7 +397,7 @@ export class SlackAPIClient {
       console.log('SlackAPIClient: POST Response status:', response.status);
       const data = response.json as T;
       console.log('SlackAPIClient: POST Response data:', data);
-      
+
       return { success: true, value: data };
     } catch (error) {
       return {
