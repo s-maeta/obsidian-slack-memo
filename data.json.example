@@ -30,19 +30,20 @@
   },
   "storageSettings": {
     "baseFolder": "Slack Sync",
-    "organizationType": "daily",
+    "organizationType": "channel-daily",
     "dailyPageSettings": {
-      "enabled": true,
+      "enabled": false,
       "folderPath": "{baseFolder}/Daily",
       "fileNameFormat": "{date}",
       "pageHeaderFormat": "# {date} - Slack Messages",
       "sectionHeaderFormat": "## #{channel}"
     },
     "channelPageSettings": {
-      "enabled": false,
-      "folderPath": "{baseFolder}/Channels/{channel}",
+      "enabled": true,
+      "folderPath": "{baseFolder}/{channel}",
       "fileNameFormat": "{date}",
-      "pageHeaderFormat": "# #{channel} - {date}"
+      "pageHeaderFormat": "# {channel} - {date}",
+      "tagFormat": "#{channel}/{date}"
     }
   }
 }

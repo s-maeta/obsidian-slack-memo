@@ -261,11 +261,21 @@ export default class SlackSyncPlugin extends Plugin {
     }
   }
 
-  // テスト用: メッセージをファイルに保存
+  // チャンネル別・日付別にメッセージをファイルに保存
   private async saveMessageToFile(channelName: string, messageContent: string): Promise<void> {
     const baseFolder = this.settings.storageSettings?.baseFolder || 'Slack Sync';
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-    const filePath = `${baseFolder}/Daily/${today}.md`;
+    
+    // 新しいフォルダ構成: {baseFolder}/{channelName}/{date}.md
+    const channelFolder = `${baseFolder}/${channelName}`;
+    const filePath = `${channelFolder}/${today}.md`;
+    
+    // チャンネルフォルダを作成（存在しない場合）
+    const folder = this.app.vault.getAbstractFileByPath(channelFolder);
+    if (!folder) {
+      console.log(`Creating channel folder: ${channelFolder}`);
+      await this.app.vault.createFolder(channelFolder);
+    }
     
     // ファイルが存在するかチェック
     const file = this.app.vault.getAbstractFileByPath(filePath);
@@ -274,22 +284,12 @@ export default class SlackSyncPlugin extends Plugin {
     if (file && file instanceof TFile) {
       content = await this.app.vault.read(file);
     } else {
-      // ディレクトリを作成
-      const folderPath = `${baseFolder}/Daily`;
-      const folder = this.app.vault.getAbstractFileByPath(folderPath);
-      if (!folder) {
-        await this.app.vault.createFolder(folderPath);
-      }
-      // ヘッダーを追加
-      content = `# ${today} - Slack Messages\n\n`;
+      // 新しいファイルのヘッダーを作成（タグ付き）
+      content = `# ${channelName} - ${today}\n\n`;
+      content += `Tags: #${channelName}/${today}\n\n`;
     }
     
-    // チャンネルセクションを追加/更新
-    const channelHeader = `## #${channelName}`;
-    if (!content.includes(channelHeader)) {
-      content += `${channelHeader}\n\n`;
-    }
-    
+    // メッセージを追加
     content += `${messageContent}\n\n`;
     
     // ファイルを作成または更新
@@ -298,6 +298,8 @@ export default class SlackSyncPlugin extends Plugin {
     } else {
       await this.app.vault.create(filePath, content);
     }
+    
+    console.log(`Saved to: ${filePath} with tag: #${channelName}/${today}`);
   }
 
   // チャンネル同期処理
