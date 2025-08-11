@@ -173,26 +173,22 @@ export default class SlackSyncPlugin extends Plugin {
 
   // コマンド実装: 手動同期を実行
   private async startManualSync(): Promise<void> {
-    new Notice('Slack同期を開始します...');
-
     try {
       if (!this.settings.slackToken) {
-        new Notice('Slackトークンが設定されていません。設定画面で設定してください。', 5000);
+        new Notice('エラー: Slackトークンが設定されていません。設定画面で設定してください。', 5000);
         this.openSettings();
         return;
       }
 
       // トークンの有効性を最初にテスト
-      new Notice('Slackトークンを検証しています...');
       const token = await this.authManager.getDecryptedToken();
       if (token) {
         const validation = await this.authManager.validateToken(token);
         if (isError(validation)) {
-          new Notice('Slackトークンが無効です。設定を確認してください。', 5000);
+          new Notice('エラー: Slackトークンが無効です。設定を確認してください。', 5000);
           console.error('Token validation failed:', validation.error);
           return;
         }
-        new Notice('トークン検証成功。チャンネル一覧を取得しています...');
       }
 
       // Get channels list
@@ -225,7 +221,6 @@ export default class SlackSyncPlugin extends Plugin {
               continue;
             } else {
               console.log(`✓ Successfully joined channel ${channel.name}`);
-              new Notice(`チャンネル ${channel.name} に参加しました`);
             }
           } catch (error) {
             console.warn(`Error joining channel ${channel.name}:`, error);
@@ -240,7 +235,6 @@ export default class SlackSyncPlugin extends Plugin {
           totalMessages += messageCount;
         } catch (error) {
           console.error(`Error syncing channel ${channel.name}:`, error);
-          new Notice(`チャンネル ${channel.name} の同期でエラー: ${error.message}`, 3000);
         }
       }
 
@@ -253,10 +247,10 @@ export default class SlackSyncPlugin extends Plugin {
         ? ` (前回同期: ${new Date(this.settings.syncHistory.lastSyncTime).toLocaleString()})`
         : '';
       
-      new Notice(`Slack同期が完了しました！ ${totalMessages} メッセージを処理しました${lastSyncInfo}`);
+      new Notice(`同期完了: ${totalMessages}件のメッセージを処理しました`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      new Notice(`同期エラー: ${errorMessage}`, 5000);
+      new Notice(`同期エラー: ${errorMessage}。詳細はコンソールログを確認してください。`, 5000);
       console.error('Slack sync error:', error);
     }
   }
@@ -446,11 +440,9 @@ export default class SlackSyncPlugin extends Plugin {
 
   // 特定チャンネルの同期処理
   private async syncSpecificChannel(channelName: string): Promise<void> {
-    new Notice(`チャンネル "${channelName}" を同期します...`);
-
     try {
       if (!this.settings.slackToken) {
-        new Notice('Slackトークンが設定されていません。設定画面で設定してください。', 5000);
+        new Notice('エラー: Slackトークンが設定されていません。設定画面で設定してください。', 5000);
         this.openSettings();
         return;
       }
@@ -470,21 +462,21 @@ export default class SlackSyncPlugin extends Plugin {
       );
 
       if (!channel) {
-        new Notice(`チャンネル "${channelName}" が見つかりませんでした。`, 3000);
+        new Notice(`エラー: チャンネル "${channelName}" が見つかりませんでした。チャンネル名を確認してください。`, 3000);
         return;
       }
 
       if (!channel.is_member) {
-        new Notice(`チャンネル "${channelName}" のメンバーではありません。`, 3000);
+        new Notice(`エラー: チャンネル "${channelName}" のメンバーではありません。チャンネルに参加してから再試行してください。`, 3000);
         return;
       }
 
       const messageCount = await this.syncChannel(channel.id, channel.name || channel.id);
-      new Notice(`チャンネル "${channelName}" の同期が完了しました！${messageCount} メッセージを処理しました。`);
+      new Notice(`同期完了: ${messageCount}件のメッセージを処理しました`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      new Notice(`チャンネル同期エラー: ${errorMessage}`, 5000);
+      new Notice(`チャンネル同期エラー: ${errorMessage}。詳細はコンソールログを確認してください。`, 5000);
       console.error('Channel sync error:', error);
     }
   }
@@ -501,26 +493,22 @@ export default class SlackSyncPlugin extends Plugin {
     this.app.setting?.open?.();
     // @ts-ignore - Obsidian APIの型定義が不完全な場合があるため
     this.app.setting?.openTabById?.(this.manifest.id);
-
-    // 代替案: 通知でユーザーに案内
-    new Notice('設定 → Community plugins → Slack Sync で設定を変更してください');
   }
 
   // コマンド実装: 同期状態を確認
   private checkSyncStatus(): void {
     const status = this.autoSyncInterval ? '自動同期中' : '待機中';
-    const lastSync = '未実行'; // 簡略化
+    const lastSyncTime = this.settings.syncHistory?.lastSyncTime;
+    const lastSync = lastSyncTime ? new Date(lastSyncTime).toLocaleString() : '未実行';
+    const totalMessages = this.settings.syncHistory?.totalMessagesSynced || 0;
 
-    new Notice(`同期状態: ${status}\n最終同期: ${lastSync}`);
+    new Notice(`同期状態: ${status}\n最終同期: ${lastSync}\n累計メッセージ数: ${totalMessages}`);
   }
 
   // コマンド実装: 自動同期のオン/オフ
   private async toggleAutoSync(): Promise<void> {
     this.settings.autoSync = !this.settings.autoSync;
     await this.saveSettings();
-
-    const status = this.settings.autoSync ? 'オン' : 'オフ';
-    new Notice(`自動同期を${status}にしました`);
 
     if (this.settings.autoSync) {
       await this.startAutoSync();
@@ -532,7 +520,7 @@ export default class SlackSyncPlugin extends Plugin {
   // 自動同期の開始
   private async startAutoSync(): Promise<void> {
     if (!this.settings.slackToken) {
-      new Notice('Slackトークンが設定されていません。自動同期を開始できません。', 5000);
+      new Notice('エラー: Slackトークンが設定されていません。自動同期を開始できません。', 5000);
       return;
     }
 
@@ -546,11 +534,9 @@ export default class SlackSyncPlugin extends Plugin {
         await this.performBackgroundSync();
       } catch (error) {
         console.error('Auto sync error:', error);
-        new Notice('自動同期でエラーが発生しました。ログを確認してください。', 3000);
+        new Notice(`自動同期エラー: ${error instanceof Error ? error.message : 'Unknown error'}。ログを確認してください。`, 3000);
       }
     }, intervalMs);
-
-    new Notice(`自動同期を開始しました（${this.settings.syncInterval / 60000}分間隔）`);
   }
 
   // 自動同期の停止
@@ -598,7 +584,7 @@ export default class SlackSyncPlugin extends Plugin {
       
       // Only show notification if messages were found
       if (totalMessages > 0) {
-        new Notice(`自動同期完了: ${totalMessages} 新着メッセージ`, 2000);
+        new Notice(`自動同期完了: ${totalMessages}件の新着メッセージ`);
       }
       
       console.log(`Background sync completed: ${totalMessages} messages processed`);
@@ -772,10 +758,8 @@ class SlackSyncSettingTab extends PluginSettingTab {
               this.plugin.settings.slackToken = value;
               await this.plugin.saveSettings();
               console.log('Token saved successfully');
-              new Notice('Slackトークンが保存されました', 2000);
             } catch (error) {
               console.error('Error saving token:', error);
-              new Notice('トークンの保存に失敗しました', 3000);
             }
           })
       );
@@ -822,7 +806,6 @@ class SlackSyncSettingTab extends PluginSettingTab {
             this.plugin.settings.storageSettings.baseFolder = folderName;
             
             await this.plugin.saveSettings();
-            new Notice(`保存先フォルダを「${folderName}」に変更しました`, 2000);
           });
       });
 
@@ -866,11 +849,8 @@ class SlackSyncSettingTab extends PluginSettingTab {
           this.plugin.settings.autoSync = value;
           await this.plugin.saveSettings();
 
-          if (value) {
-            new Notice('自動同期を有効にしました');
-          } else {
-            new Notice('自動同期を無効にしました');
-          }
+          // 設定の状態はコンソールログで確認可能
+          console.log('Auto sync setting changed:', value);
         })
       );
 
